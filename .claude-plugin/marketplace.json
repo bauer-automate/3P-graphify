@@ -1,0 +1,18 @@
+{
+  "name": "graphify",
+  "owner": {
+    "name": "Safi Shamsi"
+  },
+  "description": "graphify — turn any repo into a queryable knowledge graph",
+  "plugins": [
+    {
+      "name": "graphify",
+      "source": "./claude-plugin",
+      "description": "Turn any repo or folder of code, docs, papers, images, and videos into a persistent, queryable knowledge graph with god nodes, community detection, and query/path/explain tools. The bundled skill self-installs the graphifyy CLI from PyPI on first use.",
+      "version": "0.1.0",
+      "homepage": "https://github.com/safishamsi/graphify",
+      "license": "MIT",
+      "keywords": ["knowledge-graph", "graphrag", "codebase-analysis", "community-detection"]
+    }
+  ]
+}

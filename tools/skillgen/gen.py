@@ -907,6 +907,27 @@ def _is_uv_from_interpreter_fix_line(line: str) -> bool:
     return "uv tool run" in line and "graphifyy python" in line
 
 
+def _is_uv_tool_dir_probe_fix_line(line: str) -> bool:
+    """Whether a line is part of the side-effect-free uv-probe fix (PR #2 follow-up).
+
+    Step 1's uv branch (added by #1735) ran ``uv tool run --from graphifyy
+    python -c ...`` to detect an installed interpreter, but ``uv tool run
+    --from X`` silently downloads X into uv's ephemeral cache and "succeeds"
+    even when graphify was never actually installed, so the real ``uv tool
+    install`` never ran and no console script landed on PATH. The probe now
+    reads ``uv tool dir`` (prints the install directory only, no download) into
+    ``_UV_DIR``/``_UV_PY`` and checks the resulting venv directly, mirroring the
+    windows/powershell fragment's existing ``Find-GraphifyPython`` pattern. A
+    ``hash -r`` after each install branch clears bash's command-lookup cache so
+    a fresh install is visible to later ``graphify`` calls in the same shell.
+    Both the old (removed) ``_UV_PY``-only lines (including the bare
+    ``if [ -n "$_UV_PY" ]; then PYTHON="$_UV_PY"; fi`` that used to follow the
+    probe) and the new (added) ``_UV_DIR``/``_UV_PY``/``hash -r`` lines match
+    here.
+    """
+    return "_UV_DIR" in line or "_UV_PY" in line or "hash -r" in line
+
+
 # Every line that may differ between a rendered monolith and its pristine v8
 # baseline. Each predicate documents one sanctioned change-class; a blank line is
 # allowed because the multi-line fix blocks insert spacing. Anything else failing
@@ -924,6 +945,7 @@ _SANCTIONED_MONOLITH_DIFFS = (
     _is_shebang_allowlist_fix_line,
     _is_obsidian_usage_comment_line,
     _is_uv_from_interpreter_fix_line,
+    _is_uv_tool_dir_probe_fix_line,
 )
 
 
