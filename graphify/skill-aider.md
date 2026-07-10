@@ -37,6 +37,8 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 
 graphify is built around Andrej Karpathy's /raw folder workflow: drop anything into a folder - papers, tweets, screenshots, code, notes - and get a structured knowledge graph that shows you what you didn't know was connected.
 
+**Done when:** a fresh build has written `graphify-out/graph.json` and the God Nodes / Surprising Connections / Suggested Questions from GRAPH_REPORT.md have been shared with the user (Step 9); an `--update`/`--cluster-only` run has refreshed those same outputs; a query invocation has delivered its traversal answer.
+
 Three things it does that your AI assistant alone cannot:
 1. **Persistent graph** - relationships are stored in `graphify-out/graph.json` and survive across sessions. Ask questions weeks later without re-reading everything.
 2. **Honest audit trail** - every edge is tagged EXTRACTED, INFERRED, or AMBIGUOUS. You know what was found vs invented.

@@ -124,7 +124,7 @@ ALWAYS_ON_SANCTIONED_EDITS: dict[str, tuple[tuple[str, str], ...]] = {
 ENUM_VALUES = "code|document|paper|image|rationale|concept"
 ENUM_PROSE = "`code`, `document`, `paper`, `image`, `rationale`, `concept`"
 
-# The eight on-demand references every split platform renders. Six are
+# The eleven on-demand references every split platform renders. Nine are
 # shared-verbatim; two (extraction-spec, hooks) are variant-selected and resolved
 # per platform from the extraction/hooks_variant fields.
 _SHARED_REFERENCES = {
@@ -133,6 +133,9 @@ _SHARED_REFERENCES = {
     "github-and-merge": "references/shared/github-and-merge.md",
     "transcribe": "references/shared/transcribe.md",
     "add-watch": "references/shared/add-watch.md",
+    "semantic-extraction": "references/shared/semantic-extraction.md",
+    "graph-health-check": "references/shared/graph-health-check.md",
+    "manifest-and-cost": "references/shared/manifest-and-cost.md",
 }
 _EXTRACTION_SOURCE = {
     "verbose": "references/shared/extraction-spec.md",
@@ -928,6 +931,19 @@ def _is_uv_tool_dir_probe_fix_line(line: str) -> bool:
     return "_UV_DIR" in line or "_UV_PY" in line or "hash -r" in line
 
 
+def _is_done_when_fix_line(line: str) -> bool:
+    """Whether a line is part of the "Done when" completion-condition addition.
+
+    Every builder/pipeline skill should state a verifiable completion
+    condition (a house convention borrowed while adapting this fork). Added
+    right after the "What graphify is for" intro paragraph in both monoliths:
+    a fresh build is done once graph.json + the GRAPH_REPORT.md highlights
+    are shared, an --update/--cluster-only run is done once those outputs are
+    refreshed, and a query invocation is done once its answer is delivered.
+    """
+    return "**Done when:**" in line
+
+
 # Every line that may differ between a rendered monolith and its pristine v8
 # baseline. Each predicate documents one sanctioned change-class; a blank line is
 # allowed because the multi-line fix blocks insert spacing. Anything else failing
@@ -946,6 +962,7 @@ _SANCTIONED_MONOLITH_DIFFS = (
     _is_obsidian_usage_comment_line,
     _is_uv_from_interpreter_fix_line,
     _is_uv_tool_dir_probe_fix_line,
+    _is_done_when_fix_line,
 )
 
 
