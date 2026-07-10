@@ -16,7 +16,17 @@ build/
 graphify-out/
 .graphify_*.json
 .graphify_python
-.claude/
+.claude/*
+# The SessionStart hook infra is committed so graphify is ready automatically
+# on every fresh Claude Code on the web session. Everything else under
+# .claude/ (skills/, settings.local.json, ...) stays ignored — the hook
+# itself regenerates those each session rather than relying on git for them.
+# (Note: negating files inside an excluded directory requires excluding the
+# directory's *contents* with .claude/* rather than the directory .claude/
+# itself, or git won't descend into it to apply these overrides.)
+!.claude/settings.json
+!.claude/hooks/
+!.claude/hooks/**
 skills/
 # The packaged skill bundles under graphify/skills/ are generated, committed
 # artifacts (rendered by tools/skillgen). Keep them tracked even though the
