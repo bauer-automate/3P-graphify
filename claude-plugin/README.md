@@ -18,5 +18,9 @@ Two ways to use it:
    `skills/` directory. Keep the folder named `graphify`: Claude Code requires
    the skill folder name to match the frontmatter `name`.
 2. **Use this directory as a plugin** — point Claude Code at this directory as
-   a local plugin, or add the repo as a plugin marketplace and install
-   `graphify` from it.
+   a local plugin, or add the repo as a plugin marketplace (repo root carries
+   `.claude-plugin/marketplace.json`) and install from it:
+   ```
+   /plugin marketplace add bastudent1337/graphify
+   /plugin install graphify@graphify
+   ```
