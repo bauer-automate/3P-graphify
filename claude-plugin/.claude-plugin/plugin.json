@@ -1,0 +1,13 @@
+{
+  "name": "graphify",
+  "description": "Turn any repo or folder of code, docs, papers, images, and videos into a persistent, queryable knowledge graph with god nodes, community detection, and query/path/explain tools. The bundled skill self-installs the graphifyy CLI from PyPI on first use.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Safi Shamsi",
+    "url": "https://github.com/safishamsi/graphify"
+  },
+  "homepage": "https://github.com/safishamsi/graphify",
+  "repository": "https://github.com/safishamsi/graphify",
+  "license": "MIT",
+  "keywords": ["knowledge-graph", "graphrag", "codebase-analysis", "community-detection"]
+}

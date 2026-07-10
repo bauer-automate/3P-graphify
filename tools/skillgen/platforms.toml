@@ -43,6 +43,25 @@ extraction = "verbose"
 shell = "posix"
 claude_md = true
 
+# The committed, plugin-ready copy of claude's bundle: SKILL.md + references/
+# side by side, exactly as a Claude Code plugin's skills/graphify/ dir expects
+# (folder name must equal the frontmatter name). Repo-only — NOT shipped in
+# the wheel and NOT wired into `graphify install` (no _PLATFORM_CONFIG entry);
+# the skill's Step 1 self-bootstraps the CLI from PyPI. Its --audit-coverage
+# baseline is claude's v8 body (the body it re-homes); see _v8_baseline_ref.
+# Description intentionally diverges from the unified line: it carries the
+# plugin auto-trigger phrases ("graphify this repo", ...) and is pinned by
+# PLUGIN_DESCRIPTION in tests/test_skillgen.py.
+[platform.claude-plugin]
+bucket = "split"
+core = "core"
+skill_dst = "claude-plugin/skills/graphify/SKILL.md"
+refs_dst = "claude-plugin/skills/graphify/references"
+description = "Use for any question about a codebase, its architecture, file relationships, or project content — especially when graphify-out/ exists, where the question should be treated as a graphify query first. Also use when asked to graphify this repo, build a knowledge graph of this codebase, map the architecture, or query the code graph. Turns any input (code, docs, papers, images, videos) into a persistent knowledge graph with god nodes, community detection, and query/path/explain tools."
+dispatch = "agent-tool-disk"
+extraction = "verbose"
+shell = "posix"
+
 [platform.codex]
 bucket = "split"
 core = "core"

@@ -264,20 +264,36 @@ UNIFIED_DESCRIPTION = (
     "community detection, and query/path/explain tools."
 )
 
+# The one deliberate divergence: the committed plugin surface (claude-plugin)
+# carries auto-trigger phrases ("graphify this repo", ...) so a Claude Code
+# plugin picks the skill up from natural asks. Pinned byte-for-byte against
+# platforms.toml here.
+PLUGIN_DESCRIPTION = (
+    "Use for any question about a codebase, its architecture, file relationships, "
+    "or project content — especially when graphify-out/ exists, where the question "
+    "should be treated as a graphify query first. Also use when asked to graphify "
+    "this repo, build a knowledge graph of this codebase, map the architecture, or "
+    "query the code graph. Turns any input (code, docs, papers, images, videos) "
+    "into a persistent knowledge graph with god nodes, community detection, and "
+    "query/path/explain tools."
+)
+
 
 def test_descriptions_are_unified():
-    """Every platform now carries one unified frontmatter description, byte for byte.
+    """Every platform carries one unified frontmatter description, byte for byte.
 
     The two drifted v8 descriptions (claude's short one and the richer 14-host
     line) were collapsed into a single discovery-tuned line that leads with the
     use-condition. Every split host and both monoliths must carry it verbatim,
-    and none of the old wording may survive.
+    and none of the old wording may survive. The single exception is the
+    committed plugin surface (claude-plugin), which carries one deliberate
+    auto-trigger variant, pinned by PLUGIN_DESCRIPTION.
     """
-    expected_line = f'description: "{UNIFIED_DESCRIPTION}"'
     platforms = gen.load_platforms()
     for key, p in platforms.items():
         body = gen.render(p)[0].content
-        assert expected_line in body, f"[{key}] missing the unified description line"
+        expected = PLUGIN_DESCRIPTION if key == "claude-plugin" else UNIFIED_DESCRIPTION
+        assert f'description: "{expected}"' in body, f"[{key}] missing its description line"
         # None of the drifted v8 wording may survive on any platform.
         assert "Provides persistent graph with god nodes" not in body, f"[{key}] kept old wording"
         assert "treat the question as a /graphify query." not in body, f"[{key}] kept old wording"
@@ -937,4 +953,30 @@ def test_agents_audit_baseline_is_amps_v8_body():
     platforms = gen.load_platforms()
     assert gen._v8_baseline_ref("agents") == "47042beb05d1f6dd2186c0c499ae2840ce604ead:graphify/skill-amp.md"
     problems = gen.audit_coverage(platforms["agents"])
+    assert problems == [], "\n".join(problems)
+
+
+def test_claude_plugin_is_a_byte_clone_of_claude_modulo_description():
+    """claude-plugin re-homes claude's bundle at claude-plugin/skills/graphify/.
+
+    The committed plugin surface must never drift from claude's: all eight
+    references are byte-identical, and SKILL.md is claude's skill.md with only
+    the frontmatter description line swapped for the auto-trigger variant.
+    """
+    platforms = gen.load_platforms()
+    claude = {a.path.rsplit("/", 1)[-1]: a.content for a in gen.render(platforms["claude"])}
+    plugin = {a.path.rsplit("/", 1)[-1]: a.content for a in gen.render(platforms["claude-plugin"])}
+    for name in ("add-watch.md", "exports.md", "extraction-spec.md", "github-and-merge.md",
+                 "hooks.md", "query.md", "transcribe.md", "update.md"):
+        assert claude[name] == plugin[name], f"{name} drifted between claude and claude-plugin"
+    swapped = claude["skill.md"].replace(
+        f'description: "{UNIFIED_DESCRIPTION}"', f'description: "{PLUGIN_DESCRIPTION}"')
+    assert swapped == plugin["SKILL.md"]
+
+
+def test_claude_plugin_audit_baseline_is_claudes_v8_body():
+    """`claude-plugin` is a post-v8 platform, so its audit baseline is claude's v8 body."""
+    platforms = gen.load_platforms()
+    assert gen._v8_baseline_ref("claude-plugin") == "47042beb05d1f6dd2186c0c499ae2840ce604ead:graphify/skill.md"
+    problems = gen.audit_coverage(platforms["claude-plugin"])
     assert problems == [], "\n".join(problems)

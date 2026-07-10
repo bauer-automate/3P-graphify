@@ -33,6 +33,11 @@ skills/
 # broad skills/ rule above ignores install-target skill dirs elsewhere.
 !graphify/skills/
 !graphify/skills/**
+# The committed Claude Code plugin bundle (rendered by tools/skillgen, platform
+# key claude-plugin) — same negation as graphify/skills/ above: the bare
+# skills/ rule would otherwise hide it.
+!claude-plugin/skills/
+!claude-plugin/skills/**
 # The skillgen core fragments are the human-edited source of the lean SKILL.md.
 # A global "core" ignore (for core dumps) would otherwise drop them.
 !tools/skillgen/fragments/core/
