@@ -281,18 +281,15 @@ def test_claude_install_ships_lean_core_and_references(tmp_path):
     assert len(body.splitlines()) < 800
     # The version stamp covers SKILL.md + references/ together.
     assert (skill_dir / ".graphify_version").read_text() == mainmod.__version__
-    # The eleven on-demand fragments all landed.
+    # The eight on-demand fragments all landed.
     names = sorted(p.name for p in refs.glob("*.md"))
     assert names == [
         "add-watch.md",
         "exports.md",
         "extraction-spec.md",
         "github-and-merge.md",
-        "graph-health-check.md",
         "hooks.md",
-        "manifest-and-cost.md",
         "query.md",
-        "semantic-extraction.md",
         "transcribe.md",
         "update.md",
     ]

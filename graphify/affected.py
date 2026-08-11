@@ -15,6 +15,12 @@ DEFAULT_AFFECTED_RELATIONS = (
     "references",
     "imports",
     "imports_from",
+    # `import('…')` — emitted by the Svelte/Astro/Vue rescue passes and (since
+    # #2575) by plain JS/TS too. Omitting it made every dynamic import
+    # invisible to blast-radius traversal even where the edge WAS in the
+    # graph, and dynamic import is precisely how codebases break require
+    # cycles, so the missing edges sat under the most load-bearing modules.
+    "dynamic_import",
     "re_exports",
     "inherits",
     "extends",
@@ -22,6 +28,7 @@ DEFAULT_AFFECTED_RELATIONS = (
     "uses",
     "mixes_in",
     "embeds",
+    "requires",
 )
 
 
@@ -30,6 +37,11 @@ class AffectedHit:
     node_id: str
     depth: int
     via_relation: str
+    # The traversed edge's location — the actual call/import/reference SITE in
+    # this node's file, not the node's own definition line (#BUG1). Defaults keep
+    # existing constructors/tests working; None falls back to the node's def line.
+    via_file: "str | None" = None
+    via_location: "str | None" = None
 
 
 def _node_label(graph: nx.Graph, node_id: str) -> str:
@@ -190,7 +202,15 @@ def affected_nodes(
             if source in seen:
                 continue
             seen.add(source)
-            hit = AffectedHit(source, current_depth + 1, relation)
+            # Carry the matched edge's location (taken from the SAME edge dict
+            # whose relation passed the filter, so relation and location stay
+            # consistent) — that is the call/import/reference site in `source`'s
+            # own file, which is where the user should click (#BUG1).
+            hit = AffectedHit(
+                source, current_depth + 1, relation,
+                via_file=str(data.get("source_file") or "") or None,
+                via_location=str(data.get("source_location") or "") or None,
+            )
             hits.append(hit)
             queue.append((source, current_depth + 1))
 
@@ -221,8 +241,14 @@ def format_affected(
 
     for hit in hits:
         data = graph.nodes[hit.node_id]
+        if hit.via_location:
+            # The relation SITE in this node's file (call/import/reference line),
+            # labeled by [via_relation] so it's never mistaken for a def line.
+            location = f"{hit.via_file or data.get('source_file') or '-'}:{hit.via_location}"
+        else:
+            location = _format_location(data)  # honest fallback: the node's own def line
         lines.append(
-            f"- {_node_label(graph, hit.node_id)} [{hit.via_relation}] {_format_location(data)}"
+            f"- {_node_label(graph, hit.node_id)} [{hit.via_relation}] {location}"
         )
     return "\n".join(lines)
 

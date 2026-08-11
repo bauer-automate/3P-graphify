@@ -175,7 +175,7 @@ function showInfo(nodeId) {{
   const neighborItems = neighborIds.map(nid => {{
     const nb = nodesDS.get(nid);
     const color = nb ? nb.color.background : '#555';
-    return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" onclick="focusNode(${{JSON.stringify(nid)}})">${{esc(nb ? nb.label : nid)}}</span>`;
+    return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" data-nid="${{esc(nid)}}">${{esc(nb ? nb.label : nid)}}</span>`;
   }}).join('');
   document.getElementById('info-content').innerHTML = `
     <div class="field"><b>${{esc(n.label)}}</b></div>
@@ -192,6 +192,19 @@ function focusNode(nodeId) {{
   network.selectNodes([nodeId]);
   showInfo(nodeId);
 }}
+
+// Neighbor links use a data attribute + one delegated listener rather than an
+// inline onclick. A node id/label sourced from a document or a scraped URL
+// (graphify add) can contain a double-quote; dropping the stringified id
+// unescaped into a quoted onclick both broke every link and allowed a hostile
+// source to inject an event handler into the local report (stored XSS, #1838).
+// esc() on data-nid keeps the value inside the attribute; the listener reads it
+// back verbatim. Bound to document so it survives the innerHTML rebuild that
+// recreates #neighbors-list on each showInfo().
+document.addEventListener('click', e => {{
+  const el = e.target.closest('.neighbor-link');
+  if (el && el.dataset.nid !== undefined) focusNode(el.dataset.nid);
+}});
 
 // Track hovered node — hover detection is more reliable than click params
 let hoveredNodeId = null;
@@ -308,6 +321,50 @@ LEGEND.forEach(c => {{
   legendEl.appendChild(item);
 }});
 </script>"""
+
+
+def _html_document_title(output_path: str) -> str:
+    """Return a portable label for the graph.html <title>.
+
+    Tracked artifacts must not embed the generator host absolute path
+    (regression of #433; reported again as #2598 on Windows). Keep from the
+    configured output-dir bare name (``graphify-out`` / ``GRAPHIFY_OUT``
+    basename) onward — portable in every case; otherwise fall back to a
+    cwd-relative label, and finally the filename only.
+    """
+    from graphify.paths import GRAPHIFY_OUT_NAME
+
+    raw = str(output_path).replace("\\", "/")
+    # Drop Windows drive prefix so Path parts are comparable on any OS.
+    if len(raw) >= 3 and raw[1] == ":" and raw[0].isalpha() and raw[2] == "/":
+        raw = raw[2:]  # "/Users/..." style after drive strip
+    p = Path(raw)
+
+    parts = list(Path(raw).parts)
+    # Path("C:/Users/..") on POSIX may keep "C:" as first part — strip it.
+    if parts and len(parts[0]) == 2 and parts[0][1] == ":" and parts[0][0].isalpha():
+        parts = parts[1:]
+    # Prefer keeping from the output-dir marker onward: portable in every
+    # case, whereas a cwd-relative path still leaks host/user segments when
+    # the graph is built from a directory ABOVE the project (#2598 follow-up).
+    marker = GRAPHIFY_OUT_NAME
+    for i, part in enumerate(parts):
+        if part == marker or part.startswith("graphify-out"):
+            return "/".join(parts[i:])
+
+    # No standard out-dir marker (fully custom output path): fall back to a
+    # cwd-relative label when the target is under cwd, else the bare filename.
+    try:
+        resolved = p if p.is_absolute() else (Path.cwd() / p)
+        rel = resolved.resolve().relative_to(Path.cwd().resolve())
+        label = rel.as_posix()
+        if label and label != ".":
+            return label
+    except (ValueError, OSError, RuntimeError):
+        pass
+
+    name = p.name
+    return name if name else "graph.html"
 
 def to_html(
     G: nx.Graph,
@@ -506,7 +563,7 @@ def to_html(
     edges_json = _js_safe(vis_edges)
     legend_json = _js_safe(legend_data)
     hyperedges_json = _js_safe(getattr(G, "graph", {}).get("hyperedges", []))
-    title = _html.escape(sanitize_label(str(output_path)))
+    title = _html.escape(sanitize_label(_html_document_title(output_path)))
     stats = f"{G.number_of_nodes()} nodes &middot; {G.number_of_edges()} edges &middot; {len(communities)} communities"
 
     html = f"""<!DOCTYPE html>
