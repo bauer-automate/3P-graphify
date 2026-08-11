@@ -189,19 +189,16 @@ def test_query_heading_is_homed_in_core_stub_only():
     assert "## For /graphify path" not in core_headings
 
 
-def test_eleven_references_render_for_claude():
-    """claude renders exactly the eleven on-demand fragments from the design."""
+def test_eight_references_render_for_claude():
+    """claude renders exactly the eight on-demand fragments from the design."""
     _, refs = _claude_artifacts()
     assert sorted(refs) == [
         "add-watch.md",
         "exports.md",
         "extraction-spec.md",
         "github-and-merge.md",
-        "graph-health-check.md",
         "hooks.md",
-        "manifest-and-cost.md",
         "query.md",
-        "semantic-extraction.md",
         "transcribe.md",
         "update.md",
     ]
@@ -458,19 +455,16 @@ def test_compact_extraction_hosts_use_the_compact_spec():
         assert "(compact)" not in refs["extraction-spec.md"], f"[{key}] should be verbose"
 
 
-def test_every_split_host_renders_eleven_references():
-    """All split hosts render exactly the eleven on-demand references."""
+def test_every_split_host_renders_eight_references():
+    """All twelve split hosts render exactly the eight on-demand references."""
     platforms = gen.load_platforms()
     expected = [
         "add-watch.md",
         "exports.md",
         "extraction-spec.md",
         "github-and-merge.md",
-        "graph-health-check.md",
         "hooks.md",
-        "manifest-and-cost.md",
         "query.md",
-        "semantic-extraction.md",
         "transcribe.md",
         "update.md",
     ]
@@ -561,17 +555,16 @@ def test_generated_runbooks_pass_root_to_save_manifest():
 
     Without root=, save_manifest stores absolute path keys, so a clone or move
     breaks --update (every cached file misses and the whole corpus re-extracts).
-    The full-build monoliths, the --update reference, and (since the Step 9
-    extraction) the manifest-and-cost reference all relativize the manifest to
-    the scan root via root='INPUT_PATH'. This guards the actual shipped
-    artifacts; --check keeps them in sync with the fragments.
+    The full-build (skill.md / monoliths) and the --update reference all relativize
+    the manifest to the scan root via root='INPUT_PATH'. This guards the actual
+    shipped artifacts; --check keeps them in sync with the fragments.
     """
     targets = [
+        REPO_ROOT / "graphify" / "skill.md",
         REPO_ROOT / "graphify" / "skill-aider.md",
         REPO_ROOT / "graphify" / "skill-devin.md",
     ]
     targets += sorted((REPO_ROOT / "graphify" / "skills").glob("*/references/update.md"))
-    targets += sorted((REPO_ROOT / "graphify" / "skills").glob("*/references/manifest-and-cost.md"))
     checked = 0
     for path in targets:
         for ln in path.read_text(encoding="utf-8").splitlines():

@@ -124,7 +124,7 @@ ALWAYS_ON_SANCTIONED_EDITS: dict[str, tuple[tuple[str, str], ...]] = {
 ENUM_VALUES = "code|document|paper|image|rationale|concept"
 ENUM_PROSE = "`code`, `document`, `paper`, `image`, `rationale`, `concept`"
 
-# The eleven on-demand references every split platform renders. Nine are
+# The eight on-demand references every split platform renders. Six are
 # shared-verbatim; two (extraction-spec, hooks) are variant-selected and resolved
 # per platform from the extraction/hooks_variant fields.
 _SHARED_REFERENCES = {
@@ -133,9 +133,6 @@ _SHARED_REFERENCES = {
     "github-and-merge": "references/shared/github-and-merge.md",
     "transcribe": "references/shared/transcribe.md",
     "add-watch": "references/shared/add-watch.md",
-    "semantic-extraction": "references/shared/semantic-extraction.md",
-    "graph-health-check": "references/shared/graph-health-check.md",
-    "manifest-and-cost": "references/shared/manifest-and-cost.md",
 }
 _EXTRACTION_SOURCE = {
     "verbose": "references/shared/extraction-spec.md",
