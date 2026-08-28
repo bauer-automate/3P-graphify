@@ -364,7 +364,7 @@ def test_every_platform_query_has_expansion_and_fallback():
         # The query reference carries expansion, fallback, and path/explain.
         q = refs["query.md"]
         assert "Constrained query expansion" in q
-        assert "If the CLI is unavailable" in q
+        assert "If neither is available" in q
         assert "## For /graphify path" in q
         assert "## For /graphify explain" in q
 

@@ -188,7 +188,7 @@ const network = new vis.Network(container, {{ nodes: nodesDS, edges: edgesDS }},
     keyboard: false,
   }},
   nodes: {{ shape: 'dot', borderWidth: 1.5 }},
-  edges: {{ smooth: {{ type: 'continuous', roundness: 0.2 }}, selectionWidth: 3 }},
+  edges: {{ smooth: false, selectionWidth: 3 }},
 }});
 
 network.once('stabilizationIterationsDone', () => {{

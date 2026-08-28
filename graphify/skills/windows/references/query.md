@@ -62,13 +62,13 @@ If the list is empty, say so plainly and stop — do not proceed to traversal.
 
 Build the **expanded query string** by joining the selected tokens with spaces. Use this string as `QUESTION` below — NOT the original user question. (The original question is preserved only for `save-result` at the end.)
 
-Prefer the CLI when it is installed:
+If the MCP tool `query_graph` is available in your toolset, call it directly with `question=QUESTION` (`mode="dfs"` and `token_budget=3000` are the equivalents of the CLI flags below) — it serves the same already-loaded graph without spawning a process per call. Otherwise prefer the CLI when it is installed:
 ```bash
 graphify query "QUESTION"
 # or: graphify query "QUESTION" --dfs --budget 3000
 ```
 
-If the CLI is unavailable, load `graphify-out/graph.json` and run the traversal inline:
+If neither is available, load `graphify-out/graph.json` and run the traversal inline:
 
 1. Find the 1-3 nodes whose label best matches the expanded tokens.
 2. Run the appropriate traversal from each starting node.
@@ -185,13 +185,13 @@ At the **start** of graph work, refresh and read the lessons: run `graphify refl
 
 ## For /graphify path
 
-Find the shortest path between two named concepts in the graph. Prefer the CLI when installed:
+Find the shortest path between two named concepts in the graph. If the MCP tool `shortest_path` is available, call it directly with `source=NODE_A, target=NODE_B`. Otherwise prefer the CLI when installed:
 
 ```bash
 graphify path "NODE_A" "NODE_B"
 ```
 
-If the CLI is unavailable, run it inline:
+If neither is available, run it inline:
 
 ```bash
 $(cat graphify-out/.graphify_python) -c "
@@ -253,13 +253,13 @@ $(cat graphify-out/.graphify_python) -m graphify save-result --question "Path fr
 
 ## For /graphify explain
 
-Give a plain-language explanation of a single node - everything connected to it. Prefer the CLI when installed:
+Give a plain-language explanation of a single node - everything connected to it. If the MCP tools are available, call `get_node` (label=NODE_NAME) for its own details and `get_neighbors` (label=NODE_NAME) for its connections — together they cover the same ground. Otherwise prefer the CLI when installed:
 
 ```bash
 graphify explain "NODE_NAME"
 ```
 
-If the CLI is unavailable, run it inline:
+If neither is available, run it inline:
 
 ```bash
 $(cat graphify-out/.graphify_python) -c "

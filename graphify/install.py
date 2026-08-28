@@ -1397,12 +1397,14 @@ def _uninstall_opencode_plugin(project_dir: Path) -> None:
             config.pop("plugin")
         config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
         print(f"  {_OPENCODE_CONFIG_PATH}  ->  plugin deregistered")
-def _resolve_graphify_exe() -> str:
-    """Return the absolute path to the graphify executable, with forward slashes.
+def _resolve_graphify_exe(name: str = "graphify") -> str:
+    """Return the absolute path to a graphify console script, with forward slashes.
 
-    Falls back to bare 'graphify' if resolution fails. Using an absolute path
+    Falls back to the bare name if resolution fails. Using an absolute path
     ensures the hook works in environments where the venv Scripts/ directory is
-    not on PATH (e.g. VS Code Codex extension on Windows).
+    not on PATH (e.g. VS Code Codex extension on Windows). ``name`` selects
+    which sibling console script to resolve — ``"graphify"`` (default) or
+    ``"graphify-mcp"``, both installed into the same bin/Scripts directory.
 
     The path is normalized to forward slashes so it survives every shell that
     runs the hook command. On Windows, Claude Code runs command-type hooks
@@ -1413,16 +1415,16 @@ def _resolve_graphify_exe() -> str:
     ``.replace`` is a no-op on POSIX where paths already use forward slashes.
     """
     import shutil
-    found = shutil.which("graphify")
+    found = shutil.which(name)
     if not found:
         # Derive from sys.executable: same Scripts/ (Windows) or bin/ (Unix) dir
         scripts_dir = Path(sys.executable).parent
-        for name in ("graphify.exe", "graphify"):
-            candidate = scripts_dir / name
+        for candidate_name in (f"{name}.exe", name):
+            candidate = scripts_dir / candidate_name
             if candidate.exists():
                 found = str(candidate)
                 break
-    return (found or "graphify").replace("\\", "/")
+    return (found or name).replace("\\", "/")
 def _install_codex_hook(project_dir: Path) -> None:
     """Add graphify PreToolUse hook to .codex/hooks.json."""
     hooks_path = project_dir / ".codex" / "hooks.json"
@@ -1729,6 +1731,7 @@ def claude_install(project_dir: Path | None = None, strict: bool = False) -> Non
     # Always re-install the Claude Code PreToolUse hook so an old hook
     # payload (e.g. pre-issue-#580 wording) is replaced on upgrade.
     _install_claude_hook(project_dir or Path("."), strict=strict)
+    _install_claude_mcp(project_dir or Path("."))
 
     print()
     print("Claude Code will now check the knowledge graph before answering")
@@ -1780,6 +1783,59 @@ def _strip_graphify_hook(settings_path: Path) -> None:
     settings["hooks"]["PreToolUse"] = filtered
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     print(f"  .claude/{settings_path.name}  ->  PreToolUse hook removed")
+def _install_claude_mcp(project_dir: Path) -> None:
+    """Register the graphify MCP server in the project's .mcp.json.
+
+    Claude Code auto-discovers project-scoped MCP servers from .mcp.json. Once
+    connected, its query_graph/get_node/get_neighbors/shortest_path/... tools
+    serve the same already-loaded graph in-process, so a session issuing many
+    graph queries skips the interpreter-startup + graph.json-reparse cost that
+    `graphify query` pays on every CLI invocation. Skipped (with a hint)
+    when the optional `mcp` extra isn't installed, so a session never ends up
+    connected to a server that can only fail with ImportError.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("mcp") is None:
+        print(
+            '  .mcp.json              ->  skipped: install with `uv tool install "graphifyy[mcp]"`, '
+            "then re-run `graphify install claude` to register the MCP server"
+        )
+        return
+
+    mcp_path = project_dir / ".mcp.json"
+    config = _read_settings_for_merge(mcp_path)
+    servers = config.setdefault("mcpServers", {})
+    if not isinstance(servers, dict):
+        _refuse_to_modify(mcp_path)
+
+    servers["graphify"] = {"command": _resolve_graphify_exe("graphify-mcp"), "args": []}
+    _write_settings_with_backup(mcp_path, config)
+    print("  .mcp.json              ->  graphify MCP server registered (query_graph, get_node, shortest_path, ...)")
+def _uninstall_claude_mcp(project_dir: Path) -> None:
+    """Remove the graphify entry from the project's .mcp.json, if present.
+
+    Leaves any other registered MCP servers (and the file itself) untouched;
+    only removes .mcp.json outright when graphify was its sole entry.
+    """
+    mcp_path = project_dir / ".mcp.json"
+    if not mcp_path.exists():
+        return
+    try:
+        config = json.loads(mcp_path.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict) or "graphify" not in servers:
+        return
+    del servers["graphify"]
+    if not servers:
+        config.pop("mcpServers", None)
+    if config:
+        _write_settings_with_backup(mcp_path, config)
+    else:
+        mcp_path.unlink()
+    print("  .mcp.json              ->  graphify MCP server removed")
 def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
     """Remove graphify from every platform detected in the current project."""
     pd = project_dir or Path(".")
@@ -1869,6 +1925,7 @@ def claude_uninstall(project_dir: Path | None = None, *, project: bool = False, 
         print("graphify section not found in CLAUDE.md - nothing to do")
 
     _uninstall_claude_hook(project_dir)
+    _uninstall_claude_mcp(project_dir)
 def _strip_graphify_md_section(target: Path) -> bool:
     """Strip the ## graphify section from one CLAUDE.md-style file.
 

@@ -65,6 +65,20 @@ def test_hook_command_has_no_backslashes(monkeypatch):
         assert "\\" not in h["hooks"][0]["command"]
 
 
+def test_resolve_graphify_exe_accepts_a_sibling_console_script_name(monkeypatch):
+    # .mcp.json registration resolves the graphify-mcp console script the same
+    # way the PreToolUse hooks resolve graphify itself — same bin/Scripts dir,
+    # same forward-slash normalization, PATH checked with the requested name.
+    from graphify.__main__ import _resolve_graphify_exe
+    seen = []
+    def _fake_which(name):
+        seen.append(name)
+        return r"C:\Users\me\graphify-mcp.EXE" if name == "graphify-mcp" else None
+    monkeypatch.setattr("shutil.which", _fake_which)
+    assert _resolve_graphify_exe("graphify-mcp") == "C:/Users/me/graphify-mcp.EXE"
+    assert seen == ["graphify-mcp"]
+
+
 def test_command_has_no_shell_syntax():
     # #522: no POSIX bash that Windows cmd.exe/PowerShell can't parse.
     cmd = _search_matcher()["hooks"][0]["command"]
