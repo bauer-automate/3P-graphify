@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "/home/user/3P-graphify/.venv/bin/graphify-mcp",
+      "args": []
+    }
+  }
+}

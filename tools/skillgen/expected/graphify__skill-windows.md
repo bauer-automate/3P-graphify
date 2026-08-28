@@ -118,10 +118,15 @@ if (-not $GRAPHIFY_PYTHON) {
     $GRAPHIFY_PYTHON = Find-GraphifyPython
 }
 
-# Save interpreter path — all subsequent steps read this
-$GRAPHIFY_PYTHON | Out-File -FilePath graphify-out\.graphify_python -Encoding utf8 -NoNewline
+# Save interpreter path — all subsequent steps read this.
+# `Out-File -Encoding utf8` always writes a BOM on Windows PowerShell 5.1 (utf8NoBOM
+# only exists from PowerShell 6), and that BOM rides into the saved path, so the hook
+# rebuild fails with WinError 123 (#3028). WriteAllText with an explicit BOM-less
+# encoding writes the bytes POSIX writes, and adds no trailing newline.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_python'), [string]$GRAPHIFY_PYTHON, $Utf8NoBom)
 # Save scan root so `graphify update` (no args) knows where to look next time
-(Resolve-Path INPUT_PATH).Path | Out-File -FilePath graphify-out\.graphify_root -Encoding utf8 -NoNewline
+[System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_root'), (Resolve-Path INPUT_PATH).Path, $Utf8NoBom)
 ```
 
 If the import succeeds, print nothing and move straight to Step 2.
@@ -708,13 +713,15 @@ Both are non-default subcommands. `--update` re-extracts only new or changed fil
 
 ## For /graphify query
 
-When `graphify-out/graph.json` already exists and the user asks a question about the corpus, answer from the graph rather than rebuilding it:
+When `graphify-out/graph.json` already exists and the user asks a question about the corpus, answer from the graph rather than rebuilding it.
+
+If graphify's MCP tools (`query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `get_community`, `god_nodes`, `graph_stats`) are available in your toolset, call them directly — they serve the same already-loaded graph in-process, with no CLI process spawned per call, which matters once a session issues many queries. Otherwise:
 
 ```powershell
 graphify query "<question>"
 ```
 
-Before traversal, expand the question against the graph's own vocabulary so a wording mismatch does not collapse the answer to noise. If the `graphify query` CLI is unavailable, fall back to an inline NetworkX traversal of `graphify-out/graph.json`. Answer using only what the graph output contains, and quote `source_location` when citing a specific fact. For that vocab-expansion step, the BFS/DFS traversal modes, the `--budget` cap, the NetworkX fallback, `save-result` feedback, and the `/graphify path` and `/graphify explain` flows, see `references/query.md`.
+Before traversal, expand the question against the graph's own vocabulary so a wording mismatch does not collapse the answer to noise. If neither the MCP tools nor the `graphify query` CLI are available, fall back to an inline NetworkX traversal of `graphify-out/graph.json`. Answer using only what the graph output contains, and quote `source_location` when citing a specific fact. For that vocab-expansion step, the BFS/DFS traversal modes, the `--budget` cap, the NetworkX fallback, `save-result` feedback, and the `/graphify path` and `/graphify explain` flows, see `references/query.md`.
 
 ---
 

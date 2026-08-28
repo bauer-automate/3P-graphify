@@ -137,6 +137,85 @@ def test_uninstall_removes_settings_hook(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# .mcp.json MCP server registration
+# ---------------------------------------------------------------------------
+
+def test_install_registers_mcp_server(tmp_path):
+    """claude_install writes .mcp.json with a graphify entry (when `mcp` is installed)."""
+    import json
+    import importlib.util
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed")
+    claude_install(tmp_path)
+    mcp_path = tmp_path / ".mcp.json"
+    assert mcp_path.exists()
+    servers = json.loads(mcp_path.read_text()).get("mcpServers", {})
+    assert "graphify" in servers
+    assert servers["graphify"]["command"]
+
+
+def test_install_mcp_preserves_other_servers(tmp_path):
+    """Registering graphify's MCP server does not clobber an existing entry."""
+    import json
+    import importlib.util
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed")
+    mcp_path = tmp_path / ".mcp.json"
+    mcp_path.write_text(json.dumps({"mcpServers": {"other": {"command": "foo"}}}))
+    claude_install(tmp_path)
+    servers = json.loads(mcp_path.read_text())["mcpServers"]
+    assert servers["other"] == {"command": "foo"}
+    assert "graphify" in servers
+
+
+def test_install_mcp_is_idempotent(tmp_path):
+    """Running claude_install twice does not change .mcp.json further."""
+    import json
+    import importlib.util
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed")
+    claude_install(tmp_path)
+    first = json.loads((tmp_path / ".mcp.json").read_text())
+    claude_install(tmp_path)
+    second = json.loads((tmp_path / ".mcp.json").read_text())
+    assert first == second
+
+
+def test_install_mcp_skipped_without_mcp_package(tmp_path, capsys):
+    """No .mcp.json is written when the optional `mcp` extra isn't installed."""
+    from unittest.mock import patch
+    with patch("importlib.util.find_spec", return_value=None):
+        claude_install(tmp_path)
+    assert not (tmp_path / ".mcp.json").exists()
+    assert "graphifyy[mcp]" in capsys.readouterr().out
+
+
+def test_uninstall_removes_mcp_server(tmp_path):
+    """claude_uninstall removes only the graphify entry from .mcp.json."""
+    import json
+    import importlib.util
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed")
+    mcp_path = tmp_path / ".mcp.json"
+    mcp_path.write_text(json.dumps({"mcpServers": {"other": {"command": "foo"}}}))
+    claude_install(tmp_path)
+    claude_uninstall(tmp_path)
+    servers = json.loads(mcp_path.read_text())["mcpServers"]
+    assert "graphify" not in servers
+    assert servers["other"] == {"command": "foo"}
+
+
+def test_uninstall_deletes_mcp_json_when_graphify_was_sole_entry(tmp_path):
+    """claude_uninstall removes .mcp.json entirely if graphify was the only server."""
+    import importlib.util
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed")
+    claude_install(tmp_path)
+    claude_uninstall(tmp_path)
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+# ---------------------------------------------------------------------------
 # local-only variants: settings.local.json / CLAUDE.local.md (#1731)
 # ---------------------------------------------------------------------------
 
