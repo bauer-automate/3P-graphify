@@ -177,3 +177,79 @@ def test_partition_is_invariant_to_edge_endpoint_orientation():
     assert _grouping(_partition(forward, 1.0)) == _grouping(_partition(flipped, 1.0)), (
         "partition drifted with edge-endpoint orientation / insertion order"
     )
+
+
+def test_cluster_seed_defaults_match_the_old_hardcoded_42():
+    """cluster(G) and cluster(G, seed=42) must agree — 42 was already the
+    hardcoded seed every backend used before --seed existed, so making it a
+    real parameter must not churn any graph built with the old default."""
+    G = make_graph()
+    assert cluster(G) == cluster(G, seed=42)
+
+
+def test_cluster_same_seed_is_reproducible():
+    G = make_graph()
+    assert cluster(G, seed=7) == cluster(G, seed=7)
+
+
+def test_partition_threads_seed_to_native_leiden(monkeypatch):
+    """A caller-supplied seed must reach graspologic_native's leiden(), not
+    the hardcoded 42 it used before --seed existed (#7 item 2)."""
+    import graphify.cluster as cl
+    real_native = cl._native_leiden
+    captured: dict = {}
+
+    def spy(stable, resolution, seed=42):
+        captured["seed"] = seed
+        return real_native(stable, resolution, seed=seed)
+
+    monkeypatch.setattr(cl, "_native_leiden", spy)
+    G = nx.Graph()
+    G.add_edge("a", "b")
+    cl._partition(G, 1.0, seed=99)
+    assert captured["seed"] == 99
+
+
+def test_louvain_fallback_uses_caller_seed(monkeypatch):
+    """When neither graspologic_native nor graspologic is importable, the
+    networkx Louvain fallback must also receive the caller's seed rather than
+    the hardcoded 42 it used before --seed existed."""
+    import graphify.cluster as cl
+    monkeypatch.setattr(cl, "_native_leiden", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "graspologic", None)
+    monkeypatch.setitem(sys.modules, "graspologic.partition", None)
+
+    real_louvain = nx.community.louvain_communities
+    captured: dict = {}
+
+    def spy(G, **kwargs):
+        captured.update(kwargs)
+        return real_louvain(G, **kwargs)
+
+    monkeypatch.setattr(nx.community, "louvain_communities", spy)
+    G = nx.Graph()
+    G.add_edge("a", "b")
+    G.add_edge("b", "c")
+    cl._partition(G, 1.0, seed=123)
+    assert captured.get("seed") == 123
+
+
+def test_split_community_and_cluster_pass_seed_through(monkeypatch):
+    """cluster()'s oversized/low-cohesion split passes (_split_community) must
+    forward the caller's seed to their own _partition() calls too, not just
+    the top-level one."""
+    import graphify.cluster as cl
+    seen_seeds: list[int] = []
+    real_partition = cl._partition
+
+    def spy(G, resolution=1.0, seed=42):
+        seen_seeds.append(seed)
+        return real_partition(G, resolution=resolution, seed=seed)
+
+    monkeypatch.setattr(cl, "_partition", spy)
+    G = make_graph()
+    cl.cluster(G, seed=17)
+    assert seen_seeds, "cluster() never called _partition()"
+    assert all(s == 17 for s in seen_seeds), (
+        f"not every _partition() call (including any _split_community splits) got the caller's seed: {seen_seeds}"
+    )

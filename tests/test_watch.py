@@ -1163,7 +1163,7 @@ def test_rebuild_code_is_idempotent_when_cluster_ids_flap(tmp_path, monkeypatch)
 
     calls = {"n": 0}
 
-    def flaky_cluster(G):
+    def flaky_cluster(G, **kwargs):
         calls["n"] += 1
         nodes = sorted(G.nodes())
         if calls["n"] % 2 == 1:
@@ -1196,7 +1196,7 @@ def test_rebuild_code_skips_cluster_when_topology_unchanged(tmp_path, monkeypatc
 
     calls = {"n": 0}
 
-    def cluster_once(G):
+    def cluster_once(G, **kwargs):
         calls["n"] += 1
         if calls["n"] > 1:
             raise AssertionError("cluster() should be skipped when topology is unchanged")
