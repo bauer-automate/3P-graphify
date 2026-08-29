@@ -1163,6 +1163,66 @@ def _cut_lines_to_budget(lines: list[str], token_budget: int, narrow_hint: str) 
     )
 
 
+def _reading_list_text(
+    G: nx.Graph,
+    nodes: set[str],
+    *,
+    seeds: list[str] | None = None,
+    token_budget: int = 2000,
+    header: str | None = None,
+) -> str:
+    """Roll a node set (a community, or a node neighborhood) up to its
+    deduplicated source files, ordered by relevance — a "reading list" a
+    router/skill can hand a model as files it must open, instead of relying
+    on the model to traverse the graph itself (issue #7 item 3).
+
+    When `seeds` is given (the node-neighborhood case), files are ranked by
+    the shortest hop distance from a seed among their member nodes — mirrors
+    the seed-first ordering `_subgraph_to_text` uses. Without seeds (the
+    community case, which has no single seed), files fall back to their
+    highest-degree member — the same structural-hub signal
+    `label_communities_by_hub` uses to name a community — then alphabetical.
+    """
+    seed_hits = [n for n in (seeds or []) if n in nodes]
+    dist: dict[str, int] = {n: 0 for n in seed_hits}
+    frontier, hop = seed_hits, 0
+    while frontier:
+        hop += 1
+        nxt = []
+        for n in frontier:
+            for nb in G.neighbors(n):
+                if nb in nodes and nb not in dist:
+                    dist[nb] = hop
+                    nxt.append(nb)
+        frontier = nxt
+
+    by_file: dict[str, list[str]] = {}
+    for n in nodes:
+        src = str(G.nodes[n].get("source_file") or "")
+        if src:
+            by_file.setdefault(src, []).append(n)
+
+    def _file_key(item: tuple[str, list[str]]) -> tuple[int, int, str]:
+        src, members = item
+        best_dist = min((dist.get(n, 1 << 30) for n in members), default=1 << 30)
+        best_degree = max((G.degree(n) for n in members), default=0)
+        return (best_dist, -best_degree, src)
+
+    ordered = sorted(by_file.items(), key=_file_key)
+    lines = [
+        f"FILE {sanitize_label(src)} ({len(members)} node{'' if len(members) == 1 else 's'})"
+        for src, members in ordered
+    ]
+    if not lines:
+        return "No source files found — every matched node is missing a source_file."
+    if header:
+        lines.insert(0, header)
+    return _cut_lines_to_budget(
+        lines, token_budget,
+        "Raise token_budget or narrow to a smaller community/neighborhood",
+    )
+
+
 def _display_graph_path(graph_path: str) -> str:
     """Render a graph path for the query header.
 
@@ -1633,6 +1693,24 @@ def _build_server(graph_path: str):
                 },
             ),
             types.Tool(
+                name="get_reading_list",
+                description=(
+                    "Return the deduplicated, relevance-ordered list of source files touched by "
+                    "a community or a node's neighborhood — a mandatory reading list to hand a "
+                    "router/skill instead of relying on it to traverse the graph itself. "
+                    "Pass exactly one of community_id or label."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "community_id": {"type": "integer", "description": "Community ID (0-indexed by size)"},
+                        "label": {"type": "string", "description": "Node label or ID; lists files in its neighborhood"},
+                        "depth": {"type": "integer", "default": 2, "description": "Neighborhood traversal depth when using label (1-6)"},
+                        "token_budget": {"type": "integer", "default": 2000, "description": "Max output tokens"},
+                    },
+                },
+            ),
+            types.Tool(
                 name="god_nodes",
                 description="Return the most connected nodes - the core abstractions of the knowledge graph.",
                 inputSchema={"type": "object", "properties": {"top_n": {"type": "integer", "default": 10}}},
@@ -1848,6 +1926,43 @@ def _build_server(graph_path: str):
             lines, budget, "Raise token_budget or use get_node for specific members"
         )
 
+    def _tool_get_reading_list(arguments: dict) -> str:
+        cid = arguments.get("community_id")
+        label = arguments.get("label")
+        if cid is None and not label:
+            return "error: pass exactly one of community_id or label."
+        if cid is not None and label:
+            return "error: pass exactly one of community_id or label, not both."
+        budget = int(arguments.get("token_budget", 2000))
+        if cid is not None:
+            cid = int(cid)
+            members = communities.get(cid, [])
+            if not members:
+                return f"Community {cid} not found."
+            header = _community_header(cid, G.nodes[members[0]].get("community_name"))
+            return _reading_list_text(
+                G, set(members), token_budget=budget, header=f"Reading list for {header}:"
+            )
+        label_lower = label.lower()
+        matches = _find_node(G, label_lower)
+        if not matches:
+            return f"No node matching '{label}' found."
+        rivals = find_node_ambiguity(G, label_lower)
+        if rivals:
+            listing = "\n".join(
+                f"  {G.nodes[r].get('source_file') or r}\n    id: {r}" for r in rivals
+            )
+            return (
+                f"Ambiguous: '{label}' matches {len(rivals)} nodes in different files.\n"
+                f"{listing}\n"
+                "Retry with the repo-relative path or the full node id."
+            )
+        nid = matches[0]
+        depth = min(int(arguments.get("depth", 2)), 6)
+        nodes, _edges = _bfs(G, [nid], depth)
+        header = f"Reading list for {sanitize_label(G.nodes[nid].get('label', nid))} (depth={depth}):"
+        return _reading_list_text(G, nodes, seeds=[nid], token_budget=budget, header=header)
+
     def _tool_god_nodes(arguments: dict) -> str:
         from graphify.analyze import god_nodes as _god_nodes
         nodes = _god_nodes(G, top_n=int(arguments.get("top_n", 10)))
@@ -1960,6 +2075,7 @@ def _build_server(graph_path: str):
         "get_node": _tool_get_node,
         "get_neighbors": _tool_get_neighbors,
         "get_community": _tool_get_community,
+        "get_reading_list": _tool_get_reading_list,
         "god_nodes": _tool_god_nodes,
         "graph_stats": _tool_graph_stats,
         "shortest_path": _tool_shortest_path,
