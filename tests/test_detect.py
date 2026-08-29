@@ -3423,6 +3423,83 @@ def test_lexical_relative_matches_pathlib_relative_to():
             assert _lexical_relative(target, target.parts, anchor) == expected, (t, r)
 
 
+# --- inventory-only extraction tier (#7 item 1) ---
+
+def test_inventory_directive_routes_matched_files_out_of_their_normal_bucket(tmp_path):
+    """A path matched by `inventory:` is neither ignored nor fully classified —
+    it is reported separately in inventory_files, absent from files[...]."""
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    (samples / "a.py").write_text("def f(): pass\n")
+    (tmp_path / ".graphifyignore").write_text("inventory: samples/**\n")
+    (tmp_path / "main.py").write_text("x = 1\n")
+
+    result = detect(tmp_path)
+    assert any("main.py" in f for f in result["files"]["code"])
+    assert not any("a.py" in f for f in result["files"]["code"])
+    assert any("a.py" in f for f in result["inventory_files"])
+    assert not any("a.py" in f for f in result["ignored"])
+
+
+def test_inventory_directive_does_not_exclude_the_path(tmp_path):
+    """inventory: must not behave like an ignore rule — the file is still
+    discovered (just routed differently), so it never shows up in `ignored`."""
+    (tmp_path / ".graphifyignore").write_text("inventory: notes.md\n")
+    (tmp_path / "notes.md").write_text("hello\n")
+
+    result = detect(tmp_path)
+    assert result["inventory_files"] == [str(tmp_path / "notes.md")]
+    assert result["ignored"] == []
+
+
+def test_inventory_directive_negation_rescues_a_subpath(tmp_path):
+    """Last-match-wins applies to the inventory pattern set exactly like the
+    ignore pattern set: a later `!` re-excludes a path from inventory scope,
+    sending it back through normal classification."""
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    (samples / "vendored.py").write_text("x = 1\n")
+    (samples / "full.py").write_text("x = 2\n")
+    (tmp_path / ".graphifyignore").write_text(
+        "inventory: samples/**\ninventory: !samples/full.py\n"
+    )
+
+    result = detect(tmp_path)
+    assert any("vendored.py" in f for f in result["inventory_files"])
+    assert not any("full.py" in f for f in result["inventory_files"])
+    assert any("full.py" in f for f in result["files"]["code"])
+
+
+def test_inventory_directive_ignores_gitignore_lines(tmp_path):
+    """`inventory:` is graphify-specific — a matching line in .gitignore (not
+    .graphifyignore) must not be treated as an inventory directive."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("inventory: samples/**\n")
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    (samples / "a.py").write_text("x = 1\n")
+
+    result = detect(tmp_path)
+    assert result["inventory_files"] == []
+    # The literal gitignore pattern "inventory:" doesn't match samples/a.py
+    # either, so it's classified normally, not ignored.
+    assert any("a.py" in f for f in result["files"]["code"])
+
+
+def test_inventory_directive_picked_up_live_below_scan_root(tmp_path):
+    """A nested .graphifyignore's `inventory:` line (discovered during the
+    os.walk, not the ancestor-chain preload) must be honored, mirroring how
+    nested ignore files are honored (#1206)."""
+    nested = tmp_path / "vendor" / "samples"
+    nested.mkdir(parents=True)
+    (nested / "a.py").write_text("x = 1\n")
+    (tmp_path / "vendor" / ".graphifyignore").write_text("inventory: samples/**\n")
+
+    result = detect(tmp_path)
+    assert any("a.py" in f for f in result["inventory_files"])
+    assert not any("a.py" in f for f in result["files"]["code"])
+
+
 def test_globstar_matcher_leaves_no_reference_cycle():
     """`_match_anchored_ignore_pattern` must not leak a reference cycle per call,
     as the old per-call `@lru_cache` closure did (it referenced itself). With gc
