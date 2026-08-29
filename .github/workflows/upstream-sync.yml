@@ -1,0 +1,100 @@
+name: Upstream sync
+
+# Checks Graphify-Labs/graphify (the upstream this repo forks) for commits on
+# its v8 branch not yet in ours, and opens a PR merging them in — the same
+# thing PR #6 did by hand. Never auto-merges: the most recent sync needed a
+# real conflict resolution (tests/test_skillgen.py), so every sync PR still
+# goes through the normal CI + review gate before landing. No repo has an
+# `upstream` git remote configured, so the URL below is the only record of
+# where this fork's history comes from — update it if that ever changes.
+on:
+  schedule:
+    - cron: "0 7 * * 1"  # weekly, Monday 07:00 UTC
+  workflow_dispatch:      # on-demand sync, e.g. before a claude-skills graph rebuild
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_URL: https://github.com/Graphify-Labs/graphify.git
+  UPSTREAM_BRANCH: v8
+  BASE_BRANCH: v8
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: git fetch "$UPSTREAM_URL" "$UPSTREAM_BRANCH"
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          count=$(git rev-list --count HEAD..FETCH_HEAD)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "$count new upstream commit(s) since the last sync."
+
+      - name: Check for an already-open sync PR
+        if: steps.check.outputs.count != '0'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="sync/upstream-$(date -u +%Y-%m-%d)"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          open_count=$(gh pr list --head "$branch" --state open --json number --jq 'length')
+          echo "open_count=$open_count" >> "$GITHUB_OUTPUT"
+
+      - name: Create sync branch and merge upstream
+        if: steps.check.outputs.count != '0' && steps.existing.outputs.open_count == '0'
+        id: merge
+        run: |
+          branch="${{ steps.existing.outputs.branch }}"
+          git checkout -b "$branch"
+          upstream_tip=$(git rev-parse FETCH_HEAD)
+          echo "upstream_tip=$upstream_tip" >> "$GITHUB_OUTPUT"
+          if git merge FETCH_HEAD --no-edit; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            git add -A
+            git commit -m "Merge upstream Graphify-Labs/graphify ${UPSTREAM_BRANCH} (CONFLICTED — needs manual resolution)"
+          fi
+          git push -u origin "$branch"
+
+      - name: Open the sync PR
+        if: steps.check.outputs.count != '0' && steps.existing.outputs.open_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="${{ steps.existing.outputs.branch }}"
+          commits="${{ steps.check.outputs.count }}"
+          tip="${{ steps.merge.outputs.upstream_tip }}"
+          if [ "${{ steps.merge.outputs.conflict }}" = "true" ]; then
+            title="Sync fork with upstream Graphify-Labs/graphify ${UPSTREAM_BRANCH} — CONFLICTS, needs resolution"
+            body="Automated sync found ${commits} new commit(s) on \`Graphify-Labs/graphify\`'s \`${UPSTREAM_BRANCH}\` (up to \`${tip}\`), but the merge left conflicts.
+
+          Resolve them on this branch, then mark the PR ready for review. Do not merge until conflicts are resolved and CI is green."
+          else
+            title="Sync fork with upstream Graphify-Labs/graphify ${UPSTREAM_BRANCH} (${commits} commits)"
+            body="Automated sync: merges ${commits} new commit(s) from \`Graphify-Labs/graphify\`'s \`${UPSTREAM_BRANCH}\` (up to \`${tip}\`) into this fork's \`${BASE_BRANCH}\`.
+
+          Merged cleanly. Review the diff and confirm CI is green before merging — this workflow never auto-merges."
+          fi
+          gh pr create --base "$BASE_BRANCH" --head "$branch" --title "$title" --body "$body"
