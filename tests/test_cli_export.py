@@ -631,6 +631,60 @@ def test_export_html_no_community_data_at_all_still_succeeds(tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+# ── labels-fallback when .graphify_labels.json is absent ─────────────────────
+# Mirrors the communities-fallback above. `to_json` also writes the resolved
+# community_name onto every node when called with community_labels, but the
+# .graphify_labels.json sidecar can go missing independently of graph.json
+# (--no-label runs, or a rebuild path that only persists graph.json). Without
+# this fallback, export silently renders "Community N" placeholders even
+# though the real name is sitting right there in graph.json.
+
+def test_export_html_reconstructs_labels_when_sidecar_missing(tmp_path):
+    """graph.json carries real community_name values on every node whenever
+    to_json() was called with community_labels. If .graphify_labels.json
+    never got persisted, export should recover the real names from graph.json
+    instead of silently falling back to "Community N" placeholders.
+    """
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+
+    extraction = json.loads((FIXTURES / "extraction.json").read_text())
+    from graphify.build import build_from_json
+    from graphify.cluster import cluster, score_all
+    from graphify.analyze import god_nodes, surprising_connections
+    from graphify.export import to_json
+
+    G = build_from_json(extraction)
+    communities = cluster(G)
+    cohesion = score_all(G, communities)
+    gods = god_nodes(G)
+    surprises = surprising_connections(G, communities)
+    labels = {cid: f"Totally Real Label {cid}" for cid in communities}
+
+    to_json(G, communities, str(out / "graph.json"), community_labels=labels)
+    analysis = {
+        "communities": {str(k): v for k, v in communities.items()},
+        "cohesion": {str(k): v for k, v in cohesion.items()},
+        "gods": gods,
+        "surprises": surprises,
+    }
+    (out / ".graphify_analysis.json").write_text(json.dumps(analysis))
+    (out / ".graphify_labels.json").write_text(
+        json.dumps({str(k): v for k, v in labels.items()})
+    )
+
+    # Simulate a rebuild path that never persisted the labels sidecar, even
+    # though the real names are already baked into graph.json.
+    (out / ".graphify_labels.json").unlink()
+
+    r = _run(["export", "html"], tmp_path)
+    assert r.returncode == 0, r.stderr
+
+    html = (out / "graph.html").read_text()
+    assert any(label in html for label in labels.values())
+    assert not any(f"Community {cid}" in html for cid in communities)
+
+
 def test_graph_json_node_ids_are_portable_across_checkout_paths(tmp_path):
     """#1789: the committed graph.json's node ids must be relative to the scan
     root — not embed the absolute path — so the same repo yields identical ids
