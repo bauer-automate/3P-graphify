@@ -2955,6 +2955,31 @@ def dispatch_command(cmd: str) -> None:
         if labels_path.exists():
             labels = {int(k): v for k, v in json.loads(labels_path.read_text(encoding="utf-8")).items()}
 
+        # Fallback: mirror the `communities` reconstruction above. graph.json
+        # carries the per-node community_name as a node attribute whenever the
+        # graph was clustered and labeled (`to_json` writes it on every node
+        # right alongside `community`) — but `.graphify_labels.json` isn't
+        # always persisted (e.g. --no-label runs, or a rebuild path that skips
+        # the sidecar). When that happens, reconstruct `labels` from the graph
+        # itself so export doesn't silently render every community as a bare
+        # "Community {cid}" placeholder when the real name is right there.
+        if not labels:
+            reconstructed_labels: dict[int, str] = {}
+            for node_id, data in G.nodes(data=True):
+                name = data.get("community_name")
+                if not name:
+                    continue
+                cid_raw = data.get("community")
+                if cid_raw is None:
+                    continue
+                try:
+                    cid = int(cid_raw)
+                except (TypeError, ValueError):
+                    continue
+                reconstructed_labels.setdefault(cid, name)
+            if reconstructed_labels:
+                labels = reconstructed_labels
+
         out_dir = graph_path.parent
 
         if subcmd == "html":
