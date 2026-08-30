@@ -161,7 +161,7 @@ def _yaml_str(s: str) -> str:
     return "".join(out)
 
 
-from graphify.exporters.base import COMMUNITY_COLORS  # noqa: E402,F401
+from graphify.exporters.base import COMMUNITY_COLORS, resolve_community_color  # noqa: E402,F401
 
 from graphify.exporters.html import to_html  # noqa: E402,F401
 
@@ -684,12 +684,17 @@ def to_obsidian(
     output_dir: str,
     community_labels: dict[int, str] | None = None,
     cohesion: dict[int, float] | None = None,
+    color_overrides: dict[str, str] | None = None,
 ) -> int:
     """Export graph as an Obsidian vault - one .md file per node with [[wikilinks]],
     plus one _COMMUNITY_name.md overview note per community (sorted to top by underscore prefix).
 
     Open the output directory as a vault in Obsidian to get an interactive
     graph view with community colors and full-text search over node metadata.
+
+    color_overrides, when given, pins specific communities (keyed by numeric
+    id or by their label in community_labels) to a hex color instead of the
+    auto-assigned COMMUNITY_COLORS cycle — see exporters.base.load_color_overrides.
 
     Returns the number of node notes + community notes written.
     """
@@ -975,7 +980,7 @@ def to_obsidian(
                 # label, the canvas colour group queried a tag that no note
                 # carries whenever the label held non-ASCII or punctuation.
                 "query": f"tag:#community/{_obsidian_tag(label)}",
-                "color": {"a": 1, "rgb": int(COMMUNITY_COLORS[cid % len(COMMUNITY_COLORS)].lstrip('#'), 16)}
+                "color": {"a": 1, "rgb": int(resolve_community_color(cid, community_labels, color_overrides).lstrip('#'), 16)}
             }
             for cid, label in sorted((community_labels or {}).items())
         ]
@@ -1285,13 +1290,15 @@ def to_svg(
     output_path: str,
     community_labels: dict[int, str] | None = None,
     figsize: tuple[int, int] = (20, 14),
+    color_overrides: dict[str, str] | None = None,
 ) -> None:
     """Export graph as an SVG file using matplotlib + spring layout.
 
     Lightweight and embeddable - works in Obsidian notes, Notion, GitHub READMEs,
     and any markdown renderer. No JavaScript required.
 
-    Node size scales with degree. Community colors match the HTML output.
+    Node size scales with degree. Community colors match the HTML output,
+    including any color_overrides — see exporters.base.load_color_overrides.
     """
     try:
         import matplotlib
@@ -1312,7 +1319,7 @@ def to_svg(
     degree = dict(G.degree())
     max_deg = max(degree.values(), default=1) or 1
 
-    node_colors = [COMMUNITY_COLORS[node_community.get(n, 0) % len(COMMUNITY_COLORS)] for n in G.nodes()]
+    node_colors = [resolve_community_color(node_community.get(n, 0), community_labels, color_overrides) for n in G.nodes()]
     node_sizes = [300 + 1200 * (degree.get(n, 1) / max_deg) for n in G.nodes()]
 
     # Draw edges - dashed for non-EXTRACTED
@@ -1335,7 +1342,7 @@ def to_svg(
     if community_labels:
         patches = [
             mpatches.Patch(
-                color=COMMUNITY_COLORS[cid % len(COMMUNITY_COLORS)],
+                color=resolve_community_color(cid, community_labels, color_overrides),
                 label=f"{label} ({len(communities.get(cid, []))})",
             )
             for cid, label in sorted(community_labels.items())

@@ -2320,6 +2320,8 @@ def dispatch_command(cmd: str) -> None:
                     _clear_html_stale_marker()
                     skip_reason = "GRAPHIFY_VIZ_NODE_LIMIT=0 disables HTML visualization"
                 else:
+                    from graphify.exporters.base import load_color_overrides
+                    _color_overrides = load_color_overrides(watch_path)
                     # Passing the positive visualization limit explicitly selects
                     # the community meta-graph when the full graph is too large.
                     html_written = to_html(
@@ -2328,6 +2330,7 @@ def dispatch_command(cmd: str) -> None:
                         str(html_target),
                         community_labels=labels or None,
                         node_limit=viz_limit,
+                        color_overrides=_color_overrides or None,
                     )
                     if html_written:
                         _clear_html_stale_marker()
@@ -2956,6 +2959,8 @@ def dispatch_command(cmd: str) -> None:
             labels = {int(k): v for k, v in json.loads(labels_path.read_text(encoding="utf-8")).items()}
 
         out_dir = graph_path.parent
+        from graphify.exporters.base import load_color_overrides
+        _color_overrides = load_color_overrides(out_dir.parent) or None
 
         if subcmd == "html":
             from graphify.export import to_html as _to_html
@@ -2969,7 +2974,8 @@ def dispatch_command(cmd: str) -> None:
                 # path so the oversized graph still renders a usable artifact.
                 _effective_node_limit = 5000 if _over_cap else node_limit
                 _to_html(G, communities, str(out_dir / "graph.html"),
-                         community_labels=labels or None, node_limit=_effective_node_limit)
+                         community_labels=labels or None, node_limit=_effective_node_limit,
+                         color_overrides=_color_overrides)
                 if G.number_of_nodes() <= _effective_node_limit:
                     print(f"graph.html written - open in any browser, no server needed")
                 if _over_cap:
@@ -2978,7 +2984,8 @@ def dispatch_command(cmd: str) -> None:
         elif subcmd == "obsidian":
             from graphify.export import to_obsidian as _to_obsidian, to_canvas as _to_canvas
             n = _to_obsidian(G, communities, str(obsidian_dir),
-                             community_labels=labels or None, cohesion=cohesion or None)
+                             community_labels=labels or None, cohesion=cohesion or None,
+                             color_overrides=_color_overrides)
             print(f"Obsidian vault: {n} notes in {obsidian_dir}/")
             _to_canvas(G, communities, str(obsidian_dir / "graph.canvas"),
                        community_labels=labels or None)
@@ -3006,7 +3013,7 @@ def dispatch_command(cmd: str) -> None:
         elif subcmd == "svg":
             from graphify.export import to_svg as _to_svg
             _to_svg(G, communities, str(out_dir / "graph.svg"),
-                    community_labels=labels or None)
+                    community_labels=labels or None, color_overrides=_color_overrides)
             print(f"graph.svg written - embeds in Obsidian, Notion, GitHub READMEs")
 
         elif subcmd == "graphml":

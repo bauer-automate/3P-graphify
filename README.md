@@ -425,6 +425,24 @@ dist/
 
 ---
 
+## Customizing community colors
+
+Communities are colored by cycling through a fixed 10-color palette in cluster order. That's deterministic given a clustering, but which color lands on which community can shift between rebuilds whenever community ids get reassigned (e.g. after code changes, or on an unseeded `graphify label`/`cluster-only` run).
+
+To pin specific communities to your own colors, create a `.graphifycolors.json` in your project root — a flat JSON object mapping a community to a `#rrggbb` hex color. Keys match either the community's numeric id or its label (the name shown in `graph.html`'s legend and in `GRAPH_REPORT.md`). Anything not listed keeps its auto-assigned color.
+
+```json
+{
+  "Authentication": "#E15759",
+  "Database Layer": "#4E79A7",
+  "7": "#59A14F"
+}
+```
+
+Applies to `graph.html`, `graph.svg`, and the Obsidian vault's graph view. Numeric ids are the more durable key — a label can change the next time you run `graphify label`. A missing file is fine (nothing is overridden), and a bad or unmatched entry is skipped with a warning rather than failing the build.
+
+---
+
 ## Team setup
 
 `graphify-out/` is meant to be committed to git so everyone on the team starts with a map.

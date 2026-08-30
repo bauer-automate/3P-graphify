@@ -1,7 +1,7 @@
 """html — moved verbatim from graphify/export.py."""
 from __future__ import annotations
 
-from graphify.exporters.base import COMMUNITY_COLORS  # noqa: E402,F401
+from graphify.exporters.base import COMMUNITY_COLORS, resolve_community_color  # noqa: E402,F401
 from pathlib import Path
 import html as _html
 from graphify.analyze import _node_community_map
@@ -401,6 +401,7 @@ def to_html(
     member_counts: dict[int, int] | None = None,
     node_limit: int | None = None,
     learning_overlay: dict | None = None,
+    color_overrides: dict[str, str] | None = None,
 ) -> bool:
     """Generate an interactive vis.js HTML visualization of the graph.
 
@@ -413,6 +414,10 @@ def to_html(
 
     If node_limit is set and the graph exceeds it, automatically builds an
     aggregated community-level meta-graph instead of raising ValueError.
+
+    color_overrides, when given, pins specific communities (keyed by numeric
+    id or by their label in community_labels) to a hex color instead of the
+    auto-assigned COMMUNITY_COLORS cycle — see exporters.base.load_color_overrides.
 
     Returns True when the output was written. Returns False when an aggregated
     view would contain fewer than two communities and is intentionally skipped.
@@ -466,7 +471,8 @@ def to_html(
                     })
                 meta.graph["hyperedges"] = remapped
             written = to_html(meta, meta_communities, output_path,
-                              community_labels=community_labels, member_counts=mc)
+                              community_labels=community_labels, member_counts=mc,
+                              color_overrides=color_overrides)
             if not written:
                 return False
             print(f"graph.html written (aggregated: {meta.number_of_nodes()} community nodes, {meta.number_of_edges()} cross-community edges)")
@@ -502,7 +508,7 @@ def to_html(
     vis_nodes = []
     for node_id, data in G.nodes(data=True):
         cid = node_community.get(node_id, 0)
-        color = COMMUNITY_COLORS[cid % len(COMMUNITY_COLORS)]
+        color = resolve_community_color(cid, community_labels, color_overrides)
         label = sanitize_label(data.get("label", node_id))
         deg = degree.get(node_id, 1)
         if member_counts:
@@ -582,7 +588,7 @@ def to_html(
     # Build community legend data
     legend_data = []
     for cid in sorted((community_labels or {}).keys()):
-        color = COMMUNITY_COLORS[cid % len(COMMUNITY_COLORS)]
+        color = resolve_community_color(cid, community_labels, color_overrides)
         lbl = _html.escape(sanitize_label((community_labels or {}).get(cid, f"Community {cid}")))
         n = member_counts.get(cid, len(communities.get(cid, []))) if member_counts else len(communities.get(cid, []))
         legend_data.append({"cid": cid, "color": color, "label": lbl, "count": n})

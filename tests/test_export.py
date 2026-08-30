@@ -288,6 +288,52 @@ def test_to_graphml_preserves_native_scalar_types():
         assert H.nodes["a"]["name"] == "x"
 
 
+def test_load_color_overrides_missing_file_returns_empty(tmp_path):
+    from graphify.exporters.base import load_color_overrides
+    assert load_color_overrides(tmp_path) == {}
+
+def test_load_color_overrides_reads_valid_spec(tmp_path):
+    from graphify.exporters.base import load_color_overrides, COLOR_SPEC_FILENAME
+    (tmp_path / COLOR_SPEC_FILENAME).write_text(
+        json.dumps({"Authentication": "#FF0000", "3": "#00ff00"})
+    )
+    assert load_color_overrides(tmp_path) == {"Authentication": "#FF0000", "3": "#00ff00"}
+
+def test_load_color_overrides_skips_invalid_entries(tmp_path, capsys):
+    """A typo'd hex value must not take down the whole spec — the good
+    entries still load, and the bad one is named in a warning."""
+    from graphify.exporters.base import load_color_overrides, COLOR_SPEC_FILENAME
+    (tmp_path / COLOR_SPEC_FILENAME).write_text(
+        json.dumps({"Good": "#ABCDEF", "BadHex": "red", "BadLen": "#ABC"})
+    )
+    overrides = load_color_overrides(tmp_path)
+    assert overrides == {"Good": "#ABCDEF"}
+    assert "BadHex" in capsys.readouterr().out
+
+def test_load_color_overrides_non_dict_or_malformed_json_is_ignored(tmp_path):
+    from graphify.exporters.base import load_color_overrides, COLOR_SPEC_FILENAME
+    spec_path = tmp_path / COLOR_SPEC_FILENAME
+    spec_path.write_text(json.dumps(["not", "a", "dict"]))
+    assert load_color_overrides(tmp_path) == {}
+    spec_path.write_text("{not valid json")
+    assert load_color_overrides(tmp_path) == {}
+
+def test_resolve_community_color_prefers_numeric_id_over_label():
+    from graphify.exporters.base import resolve_community_color
+    color = resolve_community_color(3, {3: "Auth"}, {"3": "#111111", "Auth": "#222222"})
+    assert color == "#111111"
+
+def test_resolve_community_color_falls_back_to_label():
+    from graphify.exporters.base import resolve_community_color
+    color = resolve_community_color(3, {3: "Auth"}, {"Auth": "#222222"})
+    assert color == "#222222"
+
+def test_resolve_community_color_falls_back_to_palette_when_unmatched():
+    from graphify.exporters.base import resolve_community_color, COMMUNITY_COLORS
+    color = resolve_community_color(3, {3: "Auth"}, {"Other": "#222222"})
+    assert color == COMMUNITY_COLORS[3 % len(COMMUNITY_COLORS)]
+
+
 def test_to_html_creates_file():
     G = make_graph()
     communities = cluster(G)
@@ -402,6 +448,28 @@ def test_to_html_contains_legend_with_labels():
         to_html(G, communities, str(out), community_labels=labels)
         content = out.read_text()
         assert "Group 0" in content
+
+def test_to_html_color_overrides_by_label():
+    G = make_graph()
+    communities = cluster(G)
+    labels = {cid: f"Group {cid}" for cid in communities}
+    first_cid = next(iter(communities))
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "graph.html"
+        to_html(G, communities, str(out), community_labels=labels,
+                color_overrides={f"Group {first_cid}": "#123456"})
+        content = out.read_text()
+    assert "#123456" in content
+
+def test_to_html_color_overrides_by_numeric_id():
+    G = make_graph()
+    communities = cluster(G)
+    first_cid = next(iter(communities))
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "graph.html"
+        to_html(G, communities, str(out), color_overrides={str(first_cid): "#abcdef"})
+        content = out.read_text()
+    assert "#abcdef" in content
 
 def test_to_html_contains_nodes_and_edges():
     G = make_graph()
@@ -591,6 +659,19 @@ def test_to_obsidian_never_emits_punctuation_only_filenames():
         bad = [s for s in stems if not re.search(r"\w", s, flags=re.UNICODE)]
         assert not bad, f"punctuation-only filenames emitted: {bad}"
         assert any(s == "unnamed" or s.startswith("unnamed") for s in stems), stems
+
+
+def test_to_obsidian_color_overrides_applied_to_graph_config():
+    G = make_graph()
+    communities = cluster(G)
+    labels = {cid: f"Group {cid}" for cid in communities}
+    first_cid = next(iter(communities))
+    with tempfile.TemporaryDirectory() as tmp:
+        to_obsidian(G, communities, tmp, community_labels=labels,
+                    color_overrides={f"Group {first_cid}": "#123456"})
+        config = json.loads((Path(tmp) / ".obsidian" / "graph.json").read_text())
+        rgbs = [g["color"]["rgb"] for g in config["colorGroups"]]
+    assert int("123456", 16) in rgbs
 
 
 def test_to_canvas_never_emits_punctuation_only_filenames():
