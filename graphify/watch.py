@@ -1050,6 +1050,7 @@ def _reconcile_graph_html(out: Path, graph_data: dict) -> str | None:
 
     try:
         from graphify.export import to_html
+        from graphify.exporters.base import load_color_overrides
         from graphify.paths import load_node_link_graph
 
         persisted_graph = load_node_link_graph(graph_data)
@@ -1059,6 +1060,7 @@ def _reconcile_graph_html(out: Path, graph_data: dict) -> str | None:
             str(html_target),
             community_labels=labels or None,
             node_limit=limit,
+            color_overrides=load_color_overrides(out.parent) or None,
         )
     except Exception as exc:
         if had_html:
