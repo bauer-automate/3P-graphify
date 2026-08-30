@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/user/3P-graphify/.venv/bin/graphify hook-guard search"
+            "command": "/root/.local/bin/graphify hook-guard search"
           }
         ]
       },
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/user/3P-graphify/.venv/bin/graphify hook-guard read"
+            "command": "/root/.local/bin/graphify hook-guard read"
           }
         ]
       }

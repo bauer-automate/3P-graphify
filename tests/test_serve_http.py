@@ -170,6 +170,39 @@ def test_tools_list_over_http(tmp_path):
         assert {"query_graph", "get_node", "graph_stats"} <= names
 
 
+def test_get_reading_list_over_http(tmp_path):
+    """#7 item 3: get_reading_list resolves either a community or a node's
+    neighborhood to its deduplicated source files, over the real MCP protocol."""
+    graph = {
+        "directed": True,
+        "nodes": [
+            {"id": "a", "label": "Alpha", "community": 0, "source_file": "a.py"},
+            {"id": "b", "label": "Beta", "community": 0, "source_file": "b.py"},
+        ],
+        "edges": [{"source": "a", "target": "b", "relation": "calls", "confidence": "EXTRACTED"}],
+    }
+    p = tmp_path / "graph.json"
+    p.write_text(json.dumps(graph), encoding="utf-8")
+    app = serve_mod._build_http_app(str(p), json_response=True)
+    with _client(app) as client:
+        headers = _init_session(client)
+        by_community = _call_tool(client, headers, "get_reading_list", {"community_id": 0}, rid=2)
+        assert "a.py" in by_community and "b.py" in by_community
+        by_label = _call_tool(client, headers, "get_reading_list", {"label": "Alpha"}, rid=3)
+        assert "a.py" in by_label and "b.py" in by_label
+
+
+def test_get_reading_list_requires_exactly_one_selector(tmp_path):
+    app = serve_mod._build_http_app(_graph_file(tmp_path), json_response=True)
+    with _client(app) as client:
+        headers = _init_session(client)
+        neither = _call_tool(client, headers, "get_reading_list", {}, rid=2)
+        assert "pass exactly one of" in neither
+        both = _call_tool(client, headers, "get_reading_list",
+                           {"community_id": 0, "label": "Alpha"}, rid=3)
+        assert "pass exactly one of" in both
+
+
 def _project_with_graph(tmp_path, node_count: int, name: str = "proj") -> str:
     """Create ``<proj>/graphify-out/graph.json`` and return the project dir."""
     proj = tmp_path / name

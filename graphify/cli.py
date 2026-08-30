@@ -1186,6 +1186,101 @@ def dispatch_command(cmd: str) -> None:
         )
         _touch_query_stamp(gp)
         print(_result)
+    elif cmd == "files":
+        if len(sys.argv) < 3:
+            print(
+                "Usage: graphify files <community-id-or-label> [--depth N] [--budget N] [--graph path]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        from graphify.serve import (
+            _reading_list_text,
+            _communities_from_graph,
+            _community_header,
+            _bfs,
+            _find_node,
+            find_node_ambiguity,
+        )
+        from graphify.security import sanitize_label as _sanitize_label
+        from networkx.readwrite import json_graph
+
+        query = sys.argv[2]
+        graph_path = _default_graph_path()
+        budget = 2000
+        depth = 2
+        args = sys.argv[3:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--budget" and i + 1 < len(args):
+                budget = int(args[i + 1]); i += 2
+            elif args[i].startswith("--budget="):
+                budget = int(args[i].split("=", 1)[1]); i += 1
+            elif args[i] == "--depth" and i + 1 < len(args):
+                depth = int(args[i + 1]); i += 2
+            elif args[i].startswith("--depth="):
+                depth = int(args[i].split("=", 1)[1]); i += 1
+            elif args[i] == "--graph" and i + 1 < len(args):
+                graph_path = args[i + 1]; i += 2
+            elif args[i].startswith("--graph="):
+                graph_path = args[i].split("=", 1)[1]; i += 1
+            else:
+                i += 1
+        gp = Path(graph_path).resolve()
+        if not gp.exists():
+            print(f"error: graph file not found: {gp}", file=sys.stderr)
+            sys.exit(1)
+        if not gp.suffix == ".json":
+            print("error: graph file must be a .json file", file=sys.stderr)
+            sys.exit(1)
+        _enforce_graph_size_cap_or_exit(gp)
+        try:
+            # Undirected, like `query` (not `path`/`explain`): the neighborhood
+            # traversal below must explore both callers and callees of the seed.
+            _raw = json.loads(gp.read_text(encoding="utf-8"))
+            if "links" not in _raw and "edges" in _raw:
+                _raw = dict(_raw, links=_raw["edges"])
+            try:
+                G = json_graph.node_link_graph(_raw, edges="links")
+            except TypeError:
+                G = json_graph.node_link_graph(_raw)
+        except Exception as exc:
+            print(f"error: could not load graph: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        depth = min(depth, 6)
+        try:
+            cid = int(query)
+        except ValueError:
+            cid = None
+        if cid is not None:
+            members = _communities_from_graph(G).get(cid, [])
+            if not members:
+                print(f"error: community {cid} not found", file=sys.stderr)
+                sys.exit(1)
+            header = _community_header(cid, G.nodes[members[0]].get("community_name"))
+            print(_reading_list_text(G, set(members), token_budget=budget, header=f"Reading list for {header}:"))
+        else:
+            label_lower = query.lower()
+            matches = _find_node(G, label_lower)
+            if not matches:
+                print(f"error: no node matching '{query}' found", file=sys.stderr)
+                sys.exit(1)
+            rivals = find_node_ambiguity(G, label_lower)
+            if rivals:
+                listing = "\n".join(
+                    f"  {G.nodes[r].get('source_file') or r}\n    id: {r}" for r in rivals
+                )
+                print(
+                    f"Ambiguous: '{query}' matches {len(rivals)} nodes in different files.\n"
+                    f"{listing}\n"
+                    "Retry with the repo-relative path or the full node id.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            nid = matches[0]
+            nodes, _edges = _bfs(G, [nid], depth)
+            header = f"Reading list for {_sanitize_label(G.nodes[nid].get('label', nid))} (depth={depth}):"
+            print(_reading_list_text(G, nodes, seeds=[nid], token_budget=budget, header=header))
     elif cmd == "affected":
         if len(sys.argv) < 3:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
@@ -1861,6 +1956,7 @@ def dispatch_command(cmd: str) -> None:
         graph_override: Path | None = None
         co_resolution: float = 1.0
         co_exclude_hubs: float | None = None
+        co_seed: int = 42
         label_max_concurrency: int = 4
         label_batch_size: int = 100
         # #2534: defaults make presence undetectable for these, so track whether
@@ -1890,6 +1986,10 @@ def dispatch_command(cmd: str) -> None:
                 co_exclude_hubs = float(args[i_arg + 1]); i_arg += 2
             elif a.startswith("--exclude-hubs="):
                 co_exclude_hubs = float(a.split("=", 1)[1]); i_arg += 1
+            elif a == "--seed" and i_arg + 1 < len(args):
+                co_seed = int(args[i_arg + 1]); i_arg += 2
+            elif a.startswith("--seed="):
+                co_seed = int(a.split("=", 1)[1]); i_arg += 1
             elif a == "--max-concurrency" and i_arg + 1 < len(args):
                 label_max_concurrency = int(args[i_arg + 1]); label_max_concurrency_explicit = True; i_arg += 2
             elif a.startswith("--max-concurrency="):
@@ -1950,7 +2050,7 @@ def dispatch_command(cmd: str) -> None:
         print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
         stages.mark("load")
         print("Re-clustering...")
-        communities = cluster(G, resolution=co_resolution, exclude_hubs_percentile=co_exclude_hubs)
+        communities = cluster(G, resolution=co_resolution, exclude_hubs_percentile=co_exclude_hubs, seed=co_seed)
         # Mirror the watch/update path (#822): map new cids to prior ones by
         # node-overlap so the existing .graphify_labels.json keeps attaching
         # to the same conceptual community after re-clustering. Without this,
@@ -2251,14 +2351,27 @@ def dispatch_command(cmd: str) -> None:
     elif cmd == "update":
         force = os.environ.get("GRAPHIFY_FORCE", "").lower() in ("1", "true", "yes")
         no_cluster = False
+        update_seed = 42
         args = sys.argv[2:]
         watch_arg: str | None = None
-        for a in args:
+        i_arg = 0
+        while i_arg < len(args):
+            a = args[i_arg]
             if a == "--force":
                 force = True
+                i_arg += 1
                 continue
             if a == "--no-cluster":
                 no_cluster = True
+                i_arg += 1
+                continue
+            if a == "--seed" and i_arg + 1 < len(args):
+                update_seed = int(args[i_arg + 1])
+                i_arg += 2
+                continue
+            if a.startswith("--seed="):
+                update_seed = int(a.split("=", 1)[1])
+                i_arg += 1
                 continue
             if a.startswith("-"):
                 print(f"error: unknown update option: {a}", file=sys.stderr)
@@ -2267,6 +2380,7 @@ def dispatch_command(cmd: str) -> None:
                 print("error: update accepts at most one path argument", file=sys.stderr)
                 sys.exit(2)
             watch_arg = a
+            i_arg += 1
 
         if watch_arg is not None:
             watch_path = Path(watch_arg)
@@ -2290,7 +2404,7 @@ def dispatch_command(cmd: str) -> None:
         # Interactive CLI: block on the per-repo lock rather than skip, so the
         # user sees their explicit `graphify update` complete instead of
         # exiting silently when a hook-driven rebuild happens to be running.
-        ok = _rebuild_code(watch_path, force=force, no_cluster=no_cluster, block_on_lock=True)
+        ok = _rebuild_code(watch_path, force=force, no_cluster=no_cluster, block_on_lock=True, seed=update_seed)
         if ok:
             print("Code graph updated. For doc/paper/image changes run /graphify --update in your AI assistant.")
             if not (
@@ -3058,6 +3172,7 @@ def dispatch_command(cmd: str) -> None:
         # Clustering tuning knobs
         cli_resolution: float = 1.0
         cli_exclude_hubs: float | None = None
+        cli_seed: int = 42
         cli_excludes: list[str] = []
         cli_timing: bool = False
         # --force parity with `graphify update`: the flag or GRAPHIFY_FORCE=1
@@ -3149,6 +3264,10 @@ def dispatch_command(cmd: str) -> None:
                 cli_exclude_hubs = float(args[i + 1]); i += 2
             elif a.startswith("--exclude-hubs="):
                 cli_exclude_hubs = float(a.split("=", 1)[1]); i += 1
+            elif a == "--seed" and i + 1 < len(args):
+                cli_seed = _parse_int("--seed", args[i + 1]); i += 2
+            elif a.startswith("--seed="):
+                cli_seed = _parse_int("--seed", a.split("=", 1)[1]); i += 1
             elif a == "--exclude" and i + 1 < len(args):
                 cli_excludes.append(args[i + 1]); i += 2
             elif a.startswith("--exclude="):
@@ -3282,6 +3401,7 @@ def dispatch_command(cmd: str) -> None:
             doc_files = []
             paper_files = []
             image_files = []
+            inventory_files = []
             deleted_files = []
             excluded_files = []
             graph_stale_sources = []
@@ -3302,6 +3422,14 @@ def dispatch_command(cmd: str) -> None:
             doc_files = [Path(p) for p in new_by_type.get("document", [])]
             paper_files = [Path(p) for p in new_by_type.get("paper", [])]
             image_files = [Path(p) for p in new_by_type.get("image", [])]
+            # Inventory nodes are near-zero-cost to (re)build (no AST/LLM
+            # work), so — unlike code/doc/paper/image — they are not put
+            # through the changed-vs-unchanged manifest diff: every inventory-
+            # scoped path is regenerated each run. detect() (called inside
+            # detect_incremental() above) always recomputes inventory_files
+            # fresh, so this reflects any .graphifyignore `inventory:` edit
+            # immediately, incremental run or not.
+            inventory_files = [Path(p) for p in detection.get("inventory_files", [])]
             deleted_files = list(detection.get("deleted_files", []))
             excluded_files = list(detection.get("excluded_files", []))
             unchanged_total = sum(len(v) for v in detection.get("unchanged_files", {}).values())
@@ -3312,6 +3440,7 @@ def dispatch_command(cmd: str) -> None:
             # graph's own sources are reconciled against the current corpus.
             _seen_files = {f for _fl in files_by_type.values() for f in _fl}
             _seen_files.update(detection.get("unclassified", []))
+            _seen_files.update(detection.get("inventory_files", []))
             graph_stale_sources = _stale_graph_sources(
                 existing_graph_path, target, _seen_files, detection=detection
             )
@@ -3375,6 +3504,7 @@ def dispatch_command(cmd: str) -> None:
             doc_files = [Path(p) for p in files_by_type.get("document", [])]
             paper_files = [Path(p) for p in files_by_type.get("paper", [])]
             image_files = [Path(p) for p in files_by_type.get("image", [])]
+            inventory_files = [Path(p) for p in detection.get("inventory_files", [])]
             deleted_files = []
             excluded_files = []
             graph_stale_sources = []
@@ -3382,6 +3512,7 @@ def dispatch_command(cmd: str) -> None:
             if existing_graph_path.exists():
                 _seen_files = {f for _fl in files_by_type.values() for f in _fl}
                 _seen_files.update(detection.get("unclassified", []))
+                _seen_files.update(detection.get("inventory_files", []))
                 graph_stale_sources = _stale_graph_sources(
                     existing_graph_path, target, _seen_files, detection=detection
                 )
@@ -3430,17 +3561,19 @@ def dispatch_command(cmd: str) -> None:
             # (#1908): they still exist on disk, the scan just stopped
             # covering them (ignore rules / --exclude changed).
             _excl_note = f"; {len(excluded_files)} excluded" if excluded_files else ""
+            _inv_note = f"; {len(inventory_files)} inventory" if inventory_files else ""
             print(
                 f"[graphify extract] {len(code_files)} code, {len(doc_files)} docs, "
                 f"{len(paper_files)} papers, {len(image_files)} images changed; "
                 f"{unchanged_total} unchanged; {len(deleted_files)} deleted"
-                f"{_excl_note}"
+                f"{_excl_note}{_inv_note}"
             )
         else:
+            _inv_note = f", {len(inventory_files)} inventory" if inventory_files else ""
             print(
                 f"[graphify extract] found {len(code_files)} code, "
                 f"{len(doc_files)} docs, {len(paper_files)} papers, "
-                f"{len(image_files)} images"
+                f"{len(image_files)} images{_inv_note}"
             )
         # Surface files that were seen but not classified (extensionless non-shebang
         # project files like Dockerfile/Makefile, or unsupported extensions), so they
@@ -3921,13 +4054,25 @@ def dispatch_command(cmd: str) -> None:
             print(f"[graphify extract] Cargo: {len(cargo_result['nodes'])} nodes, "
                   f"{len(cargo_result['edges'])} edges")
 
-        # Merge AST + semantic + pg_result + cargo_result. Order matters for deduplication: passing AST
-        # first means semantic node attributes win on collision (richer labels
-        # for symbols also referenced in docs). Hyperedges only come from the
+        # Inventory tier (#7 item 1): one lightweight name+description node per
+        # path, no AST parsing, no LLM call — see graphify/inventory.py. Always
+        # run over the full current inventory_files list (never cache-gated
+        # like ast_result/sem_result above): it's cheap enough that skipping
+        # unchanged files isn't worth the bookkeeping, and this way a
+        # .graphifyignore `inventory:` edit takes effect on the very next run.
+        inventory_result: dict = {"nodes": [], "edges": [], "input_tokens": 0, "output_tokens": 0}
+        if inventory_files:
+            from graphify.inventory import extract_inventory_corpus as _extract_inventory_corpus
+            print(f"[graphify extract] inventory extraction on {len(inventory_files)} file(s) (no AST/LLM)...")
+            inventory_result = _extract_inventory_corpus(inventory_files)
+
+        # Merge AST + semantic + inventory + pg_result + cargo_result. Order matters for
+        # deduplication: passing AST first means semantic node attributes win on collision
+        # (richer labels for symbols also referenced in docs). Hyperedges only come from the
         # semantic side.
         merged: dict = {
-            "nodes": list(ast_result.get("nodes", [])) + list(sem_result.get("nodes", [])) + list(pg_result.get("nodes", [])) + list(cargo_result.get("nodes", [])),
-            "edges": list(ast_result.get("edges", [])) + list(sem_result.get("edges", [])) + list(pg_result.get("edges", [])) + list(cargo_result.get("edges", [])),
+            "nodes": list(ast_result.get("nodes", [])) + list(sem_result.get("nodes", [])) + list(inventory_result.get("nodes", [])) + list(pg_result.get("nodes", [])) + list(cargo_result.get("nodes", [])),
+            "edges": list(ast_result.get("edges", [])) + list(sem_result.get("edges", [])) + list(inventory_result.get("edges", [])) + list(pg_result.get("edges", [])) + list(cargo_result.get("edges", [])),
             "hyperedges": list(sem_result.get("hyperedges", [])),
             "input_tokens": ast_result.get("input_tokens", 0) + sem_result.get("input_tokens", 0),
             "output_tokens": ast_result.get("output_tokens", 0) + sem_result.get("output_tokens", 0),
@@ -4204,7 +4349,7 @@ def dispatch_command(cmd: str) -> None:
             )
             sys.exit(1)
 
-        communities = _cluster(G, resolution=cli_resolution, exclude_hubs_percentile=cli_exclude_hubs)
+        communities = _cluster(G, resolution=cli_resolution, exclude_hubs_percentile=cli_exclude_hubs, seed=cli_seed)
         stages.mark("cluster")
         cohesion = _score_all(G, communities)
         try:

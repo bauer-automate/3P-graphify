@@ -19,7 +19,7 @@ def _suppress_output():
     return contextlib.redirect_stdout(io.StringIO())
 
 
-def _native_leiden(stable: nx.Graph, resolution: float) -> dict[str, int] | None:
+def _native_leiden(stable: nx.Graph, resolution: float, seed: int = 42) -> dict[str, int] | None:
     """Call graspologic_native.leiden() directly, bypassing graspologic's own
     package import.
 
@@ -82,7 +82,7 @@ def _native_leiden(stable: nx.Graph, resolution: float) -> dict[str, int] | None
                     randomness=0.001,
                     iterations=1,
                     use_modularity=True,
-                    seed=42,
+                    seed=seed,
                     trials=1,
                 )
         finally:
@@ -93,7 +93,7 @@ def _native_leiden(stable: nx.Graph, resolution: float) -> dict[str, int] | None
     return {id_to_node[node_id]: community for node_id, community in native_partitions.items()}
 
 
-def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
+def _partition(G: nx.Graph, resolution: float = 1.0, seed: int = 42) -> dict[str, int]:
     """Run community detection. Returns {node_id: community_id}.
 
     Tries Leiden (graspologic_native directly, then graspologic) first — best
@@ -102,6 +102,10 @@ def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
 
     resolution > 1.0 → more, smaller communities.
     resolution < 1.0 → fewer, larger communities.
+
+    seed: PRNG seed passed to whichever backend runs (Leiden or Louvain).
+        Fixed by default so repeated runs on the same graph are diffable;
+        override to confirm a result isn't a seed artifact.
 
     Output from graspologic is suppressed to prevent ANSI escape codes
     from corrupting terminal scroll buffers on Windows PowerShell 5.1.
@@ -129,7 +133,7 @@ def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
     for src, tgt, attrs in edge_rows:
         stable.add_edge(src, tgt, **attrs)
 
-    native_result = _native_leiden(stable, resolution)
+    native_result = _native_leiden(stable, resolution, seed=seed)
     if native_result is not None:
         return native_result
 
@@ -138,7 +142,7 @@ def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
         lsig = inspect.signature(leiden).parameters
         kwargs: dict = {}
         if "random_seed" in lsig:
-            kwargs["random_seed"] = 42
+            kwargs["random_seed"] = seed
         if "trials" in lsig:
             kwargs["trials"] = 1
         if "resolution" in lsig:
@@ -159,7 +163,7 @@ def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
     # Fallback: networkx louvain (available since networkx 2.7).
     # Inspect kwargs to stay compatible across NetworkX versions — max_level
     # was added in a later release and prevents hangs on large sparse graphs.
-    kwargs: dict = {"seed": 42, "threshold": 1e-4, "resolution": resolution}
+    kwargs: dict = {"seed": seed, "threshold": 1e-4, "resolution": resolution}
     if "max_level" in inspect.signature(nx.community.louvain_communities).parameters:
         kwargs["max_level"] = 10
     communities = nx.community.louvain_communities(stable, **kwargs)
@@ -224,6 +228,7 @@ def cluster(
     G: nx.Graph,
     resolution: float = 1.0,
     exclude_hubs_percentile: float | None = None,
+    seed: int = 42,
 ) -> dict[int, list[str]]:
     """Run Leiden community detection. Returns {community_id: [node_ids]}.
 
@@ -240,6 +245,10 @@ def cluster(
         percentile are excluded from partitioning and reattached to their
         majority-vote neighbour community afterwards. Useful for staging/utility
         super-hubs that inflate god-node rankings (#919).
+    seed: PRNG seed for the underlying Leiden/Louvain call, including the
+        splitting/re-splitting passes below. Default 42 (unchanged behaviour);
+        override to make a rebuild diffable against a specific prior run or to
+        rule out a seed artifact.
     """
     if G.number_of_nodes() == 0:
         return {}
@@ -267,7 +276,7 @@ def cluster(
 
     raw: dict[int, list[str]] = {}
     if connected.number_of_nodes() > 0:
-        partition = _partition(connected, resolution=resolution)
+        partition = _partition(connected, resolution=resolution, seed=seed)
         for node, cid in partition.items():
             raw.setdefault(cid, []).append(node)
 
@@ -300,7 +309,7 @@ def cluster(
     final_communities: list[list[str]] = []
     for nodes in raw.values():
         if len(nodes) > max_size:
-            final_communities.extend(_split_community(G, nodes))
+            final_communities.extend(_split_community(G, nodes, seed=seed))
         else:
             final_communities.append(nodes)
 
@@ -309,7 +318,7 @@ def cluster(
     second_pass: list[list[str]] = []
     for nodes in final_communities:
         if len(nodes) >= _COHESION_SPLIT_MIN_SIZE and cohesion_score(G, nodes) < _COHESION_SPLIT_THRESHOLD:
-            splits = _split_community(G, nodes)
+            splits = _split_community(G, nodes, seed=seed)
             second_pass.extend(splits if len(splits) > 1 else [nodes])
         else:
             second_pass.append(nodes)
@@ -325,14 +334,14 @@ def cluster(
     return {i: sorted(nodes) for i, nodes in enumerate(final_communities)}
 
 
-def _split_community(G: nx.Graph, nodes: list[str]) -> list[list[str]]:
+def _split_community(G: nx.Graph, nodes: list[str], seed: int = 42) -> list[list[str]]:
     """Run a second Leiden pass on a community subgraph to split it further."""
     subgraph = G.subgraph(nodes)
     if subgraph.number_of_edges() == 0:
         # No edges - split into individual nodes
         return [[n] for n in sorted(nodes)]
     try:
-        sub_partition = _partition(subgraph)
+        sub_partition = _partition(subgraph, seed=seed)
         sub_communities: dict[int, list[str]] = {}
         for node, cid in sub_partition.items():
             sub_communities.setdefault(cid, []).append(node)

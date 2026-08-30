@@ -1092,6 +1092,7 @@ def _rebuild_code(
     no_cluster: bool = False,
     acquire_lock: bool = True,
     block_on_lock: bool = False,
+    seed: int = 42,
 ) -> bool:
     """Re-run AST extraction + build + optional cluster + report for code files. No LLM needed.
 
@@ -1113,6 +1114,10 @@ def _rebuild_code(
 
     ``no_cluster`` skips community detection and writes raw merged extraction
     JSON to graphify-out/graph.json (mirrors ``extract --no-cluster``).
+
+    ``seed`` is the PRNG seed passed through to ``cluster()`` (default 42,
+    matching ``cluster()``'s own default) so a rebuild is diffable against a
+    prior one.
 
     Returns True on success, False on error or skipped-due-to-lock.
     """
@@ -1151,6 +1156,7 @@ def _rebuild_code(
                 force=force,
                 no_cluster=no_cluster,
                 acquire_lock=False,
+                seed=seed,
             )
             # Late-arrival drain: another hook may have queued work while we
             # were rebuilding. Loop up to _PENDING_DRAIN_MAX_PASSES times so a
@@ -1168,6 +1174,7 @@ def _rebuild_code(
                         force=force,
                         no_cluster=no_cluster,
                         acquire_lock=False,
+                        seed=seed,
                     ) and ok
             return ok
 
@@ -1693,7 +1700,7 @@ def _rebuild_code(
                     print("[graphify watch] No code-graph topology changes detected; outputs left untouched.")
                 return True
 
-        communities = cluster(G)
+        communities = cluster(G, seed=seed)
         previous_node_community = _node_community_map(existing_graph_data)
         if previous_node_community:
             communities = remap_communities_to_previous(communities, previous_node_community)

@@ -1248,6 +1248,73 @@ def _load_graphifyignore(root: Path, *, gitignore: bool = True) -> list[tuple[Pa
     return patterns
 
 
+_INVENTORY_PREFIX_RE = re.compile(r"^inventory:\s*")
+
+
+def _parse_inventory_directive(parsed_line: str) -> str | None:
+    """If *parsed_line* (already comment/whitespace-stripped by
+    _parse_gitignore_line) is an ``inventory: <pattern>`` directive, return the
+    bare gitignore-style pattern (a leading ``!`` negation is part of the
+    pattern, not stripped here). Else None.
+
+    #7 item 1: a path matched by this directive is neither ignored nor fully
+    extracted — it gets one lightweight name+description node instead of deep
+    AST/semantic extraction. Deliberately a separate directive rather than
+    reusing .graphifyrc: that file already has an unrelated, narrower meaning
+    (viz_node_limit) and no glob-matching machinery of its own.
+    """
+    m = _INVENTORY_PREFIX_RE.match(parsed_line)
+    if not m:
+        return None
+    pattern = parsed_line[m.end():].strip()
+    return pattern or None
+
+
+def _load_dir_own_inventory(d: Path) -> list[tuple[Path, str]]:
+    """Read ``inventory:`` directives from .graphifyignore directly inside *d*
+    (not its ancestors). Mirrors _load_dir_own_ignore's per-directory loading,
+    but collects the separate inventory-tier pattern set (#7 item 1) instead
+    of ignore patterns — graphify-specific, so .gitignore is never consulted.
+    """
+    patterns: list[tuple[Path, str]] = []
+    ignore_file = d / ".graphifyignore"
+    if ignore_file.exists():
+        for raw in _read_ignore_text(ignore_file).splitlines():
+            line = _parse_gitignore_line(raw)
+            if not line:
+                continue
+            pattern = _parse_inventory_directive(line)
+            if pattern:
+                patterns.append((d, pattern))
+    return patterns
+
+
+def _load_graphifyignore_inventory(root: Path) -> list[tuple[Path, str]]:
+    """Ancestor-chain load of ``inventory:`` directives, mirroring
+    _load_graphifyignore's walk (same VCS-root ceiling) but for the inventory
+    pattern set. No $GIT_DIR/info/exclude equivalent: the directive is
+    graphify-specific, not a git concept.
+
+    Like _load_graphifyignore, this covers the scan root and its ancestors
+    only; directories below the scan root are picked up live during the
+    os.walk in detect() (mirrors the ignore-pattern live-loading, #1206).
+    """
+    root = root.resolve()
+    ceiling = _find_vcs_root(root) or root
+    dirs: list[Path] = []
+    current = root
+    while True:
+        dirs.append(current)
+        if current == ceiling:
+            break
+        current = current.parent
+    dirs.reverse()
+    patterns: list[tuple[Path, str]] = []
+    for d in dirs:
+        patterns.extend(_load_dir_own_inventory(d))
+    return patterns
+
+
 # Parsed-pattern cache: raw pattern string -> (negated, directory_only,
 # path_relative, stripped_pattern). Ignore patterns are re-evaluated for every
 # walked entry; parsing the same strings per entry per scan was pure waste.
@@ -1524,6 +1591,23 @@ def _is_ignored(
     return _eval(path)
 
 
+def _is_inventory_scoped(
+    path: Path,
+    root: Path,
+    patterns: list[tuple[Path, str]],
+    *,
+    _cache: dict[Path, bool] | None = None,
+) -> bool:
+    """Whether *path* matches an ``inventory:`` directive (#7 item 1).
+
+    Reuses _is_ignored's gitignore-style last-match-wins matcher against the
+    separate inventory pattern set built by _load_graphifyignore_inventory /
+    _load_dir_own_inventory — same semantics (negation, parent-exclusion), but
+    unrelated to whether the path is actually ignored.
+    """
+    return _is_ignored(path, root, patterns, _cache=_cache)
+
+
 def _is_scan_ignored(
     path: Path,
     root: Path,
@@ -1694,6 +1778,11 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
         FileType.IMAGE: [],
         FileType.VIDEO: [],
     }
+    # Paths matched by an `inventory:` .graphifyignore directive (#7 item 1):
+    # kept out of `files` entirely (skips deep AST/semantic extraction and the
+    # Office/Google-Workspace conversion below), reported separately so the
+    # caller can route them to the cheap name+description extractor instead.
+    inventory_files: list[str] = []
     total_words = 0
 
     def _wc(path: Path) -> int:
@@ -1714,6 +1803,8 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
     pruned_noise: list[str] = []
     ignore_patterns = _load_graphifyignore(root, gitignore=gitignore)
     explicit_ignore_patterns = _load_graphifyignore(root, gitignore=False)
+    inventory_patterns = _load_graphifyignore_inventory(root)
+    inventory_cache: dict[Path, bool] = {}
     # See ignored_predicate: skip the `git ls-files` subprocess when .gitignore
     # contributes no patterns, so a non-.gitignore corpus pays nothing for it.
     tracked_files, tracked_dirs = (
@@ -1795,6 +1886,7 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
                     explicit_ignore_patterns.extend(
                         _load_dir_own_ignore(dp, gitignore=False)
                     )
+                    inventory_patterns.extend(_load_dir_own_inventory(dp))
                 # Prune noise dirs in-place so os.walk never descends into them.
                 # Dot dirs are allowed — users often want .github/, .claude/, etc.
                 # Framework caches (.next, .nuxt, …) are caught by _is_noise_dir.
@@ -1892,6 +1984,9 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
             unclassified.append(str(p))
             continue
         if ftype:
+            if inventory_patterns and _is_inventory_scoped(p, root, inventory_patterns, _cache=inventory_cache):
+                inventory_files.append(str(p))
+                continue
             if p.suffix.lower() in GOOGLE_WORKSPACE_EXTENSIONS:
                 if not google_workspace:
                     skipped_sensitive.append(
@@ -1957,6 +2052,7 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
         "warning": warning,
         "skipped_sensitive": skipped_sensitive,
         "unclassified": sorted(unclassified),
+        "inventory_files": sorted(inventory_files),
         "walk_errors": walk_errors,
         "ignored": sorted(ignored),
         "pruned_noise_dirs": sorted(pruned_noise),
