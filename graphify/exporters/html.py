@@ -195,6 +195,31 @@ network.once('stabilizationIterationsDone', () => {{
   network.setOptions({{ physics: {{ enabled: false }} }});
 }});
 
+// Selecting a node reveals its neighbours' labels on the canvas (many nodes
+// hide their label by default) so you can read what a node connects to and hop
+// along it. We stash each boosted node's original font and restore it on the
+// next selection / clear, so low-degree nodes go back to hidden.
+let _labelBoosted = [];
+function _revertNeighborLabels() {{
+  if (!_labelBoosted.length) return;
+  nodesDS.update(_labelBoosted.map(o => ({{ id: o.id, font: o.font }})));
+  _labelBoosted = [];
+}}
+function _showNeighborLabels(nodeId) {{
+  _revertNeighborLabels();
+  const ids = [nodeId].concat(network.getConnectedNodes(nodeId));
+  const upd = [];
+  ids.forEach(id => {{
+    const nb = nodesDS.get(id);
+    if (!nb) return;
+    const f = nb.font || {{}};
+    const origSize = (typeof f.size === 'number') ? f.size : 12;
+    _labelBoosted.push({{ id: id, font: {{ size: origSize, color: f.color || '#ffffff' }} }});
+    upd.push({{ id: id, font: {{ size: Math.max(origSize, 13), color: '#ffffff' }} }});
+  }});
+  if (upd.length) nodesDS.update(upd);
+}}
+
 function showInfo(nodeId) {{
   const n = nodesDS.get(nodeId);
   if (!n) return;
@@ -212,6 +237,7 @@ function showInfo(nodeId) {{
     <div class="field">Degree: ${{n._degree}}</div>
     ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
   `;
+  _showNeighborLabels(nodeId);
 }}
 
 function focusNode(nodeId) {{
@@ -253,6 +279,7 @@ network.on('click', params => {{
   if (params.nodes.length > 0) {{
     showInfo(params.nodes[0]);
   }} else if (hoveredNodeId === null) {{
+    _revertNeighborLabels();
     document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
   }}
 }});
