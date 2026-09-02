@@ -11,10 +11,29 @@ import re
 from pathlib import Path
 
 # Categorical palette for community coloring, shared by the HTML, SVG, and
-# Obsidian exporters. Moved verbatim from graphify/export.py.
+# Obsidian exporters. A graph can carry far more communities than any chart's
+# identity channel is meant to hold (Claude Code's dataviz skill: 8 hues fixed
+# order, a 9th series folds into "Other" rather than inventing a new hue) --
+# but folding isn't available here, every community needs *some* color, and
+# unlike a bar/line chart, a node-link diagram doesn't lean on color alone for
+# identity: graph position/clustering and the on-hover/legend label carry it
+# too, so exact pairwise distinctness matters less than in a standard chart.
+# The compromise: keep the 8 validated dark-mode categorical hues below
+# (Claude Code dataviz skill references/palette.md, its documented default,
+# CVD-checked) as fixed anchors, and add two more steps per hue -- lighter
+# tint and darker shade -- so reused hues read as "same family, different
+# depth" instead of colliding outright. 24 slots means the old 10-color cycle
+# repeating every 10 communities (community 0 and 10 rendered pixel-identical)
+# now repeats every 24. Tints/shades are computed, not eyeballed: mix each
+# anchor 35% toward white (tier 2) / 30% toward black (tier 3); see
+# scripts/regen-community-colors.py to reproduce or re-derive.
 COMMUNITY_COLORS = [
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
-    "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC",
+    # tier 1 -- anchors, as published (blue, orange, aqua, yellow, magenta, green, violet, red)
+    "#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767",
+    # tier 2 -- same 8 hues, +35% toward white
+    "#7eb1ee", "#e69372", "#6ac0a2", "#dcb059", "#e48ead", "#59ae59", "#b7b0f1", "#ef9c9c",
+    # tier 3 -- same 8 hues, +30% toward black
+    "#285ea0", "#983e1b", "#126f4e", "#8d5d00", "#95395a", "#005c00", "#655da3", "#a14848",
 ]
 
 # User-authored spec that pins specific communities to a hex color, overriding

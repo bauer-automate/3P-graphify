@@ -400,8 +400,14 @@ def test_to_html_neighbor_links_have_no_inline_onclick_xss():
     assert 'onclick="focusNode(' not in html
     assert "JSON.stringify(nid)" not in html
     # ...replaced by an escaped data attribute + a single delegated listener.
+    # The listener's selector has since grown to also cover the sidebar
+    # hierarchy's member rows (.legend-child, same escaped-attribute pattern,
+    # no new inline handler) -- assert .neighbor-link is still one of its
+    # targets rather than pinning the exact (now multi-class) selector string.
     assert 'data-nid="${esc(nid)}"' in html
-    assert "closest('.neighbor-link')" in html
+    m = re.search(r"closest\('([^']*)'\)", html)
+    assert m is not None, "expected a delegated closest(...) listener in the page"
+    assert ".neighbor-link" in [s.strip() for s in m.group(1).split(",")]
 
 
 def test_to_html_pins_visjs_version_with_sri():
