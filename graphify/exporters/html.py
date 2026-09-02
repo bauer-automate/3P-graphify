@@ -58,6 +58,11 @@ def _html_styles() -> str:
   .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
   .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .legend-count { color: #666; font-size: 11px; }
+  .legend-toggle { flex-shrink: 0; width: 14px; text-align: center; color: #777; cursor: pointer; user-select: none; font-size: 10px; }
+  .legend-toggle:hover { color: #e0e0e0; }
+  .legend-children { max-height: 220px; overflow-y: auto; margin: 0 0 4px 22px; border-left: 1px solid #2a2a4e; }
+  .legend-child { padding: 3px 8px; font-size: 11.5px; color: #bbb; cursor: pointer; border-left: 3px solid #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .legend-child:hover { background: #2a2a4e; color: #fff; }
   #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
   #legend-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 0; }
   #legend-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #aaa; user-select: none; }
@@ -136,11 +141,12 @@ network.on('afterDrawing', function(ctx) {{
 }});
 </script>"""
 
-def _html_script(nodes_json: str, edges_json: str, legend_json: str) -> str:
+def _html_script(nodes_json: str, edges_json: str, legend_json: str, god_ids_json: str) -> str:
     return f"""<script>
 const RAW_NODES = {nodes_json};
 const RAW_EDGES = {edges_json};
 const LEGEND = {legend_json};
+const GOD_IDS = {god_ids_json};
 
 // HTML-escape helper — prevents XSS when injecting graph data into innerHTML
 function esc(s) {{
@@ -205,9 +211,35 @@ function _revertNeighborLabels() {{
   nodesDS.update(_labelBoosted.map(o => ({{ id: o.id, font: o.font }})));
   _labelBoosted = [];
 }}
+
+// Idle, each community shows exactly one label (its god node -- see
+// god_ids in html.py) for orientation. Once a selection narrows the canvas
+// to one node's neighbourhood, those standalone community labels just add
+// clutter, so hide every god label the selection doesn't already cover
+// (one inside the neighbourhood gets boosted below like any other neighbour
+// -- reading its CURRENT font, which self-heals it back to visible even if
+// a previous selection had hidden it). _restoreGodLabels puts them all back
+// unconditionally on deselect, so a god node never gets stuck hidden behind
+// a stale "original size" captured while it happened to be hidden.
+const GOD_FONT = {{ size: 12, color: '#ffffff' }};
+let _godHidden = false;
+function _hideGodLabels(exceptIds) {{
+  if (!GOD_IDS.length) return;
+  const exceptSet = new Set(exceptIds || []);
+  const upd = GOD_IDS.filter(id => !exceptSet.has(id)).map(id => ({{ id: id, font: {{ size: 0, color: '#ffffff' }} }}));
+  if (upd.length) nodesDS.update(upd);
+  _godHidden = true;
+}}
+function _restoreGodLabels() {{
+  if (!_godHidden) return;
+  nodesDS.update(GOD_IDS.map(id => ({{ id: id, font: GOD_FONT }})));
+  _godHidden = false;
+}}
+
 function _showNeighborLabels(nodeId) {{
   _revertNeighborLabels();
   const ids = [nodeId].concat(network.getConnectedNodes(nodeId));
+  _hideGodLabels(ids);
   const upd = [];
   ids.forEach(id => {{
     const nb = nodesDS.get(id);
@@ -255,7 +287,7 @@ function focusNode(nodeId) {{
 // back verbatim. Bound to document so it survives the innerHTML rebuild that
 // recreates #neighbors-list on each showInfo().
 document.addEventListener('click', e => {{
-  const el = e.target.closest('.neighbor-link');
+  const el = e.target.closest('.neighbor-link, .legend-child');
   if (el && el.dataset.nid !== undefined) focusNode(el.dataset.nid);
 }});
 
@@ -280,6 +312,7 @@ network.on('click', params => {{
     showInfo(params.nodes[0]);
   }} else if (hoveredNodeId === null) {{
     _revertNeighborLabels();
+    _restoreGodLabels();
     document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
   }}
 }});
@@ -340,6 +373,15 @@ function toggleAllCommunities(hide) {{
   updateSelectAllState();
 }}
 
+// Community -> member nodes, degree-descending (god node first), built once
+// from data already on the page -- no extra payload for the sidebar hierarchy.
+const membersByCommunity = new Map();
+RAW_NODES.forEach(n => {{
+  if (!membersByCommunity.has(n.community)) membersByCommunity.set(n.community, []);
+  membersByCommunity.get(n.community).push(n);
+}});
+membersByCommunity.forEach(list => list.sort((a, b) => (b.degree || 0) - (a.degree || 0)));
+
 const legendEl = document.getElementById('legend');
 LEGEND.forEach(c => {{
   const item = document.createElement('div');
@@ -363,16 +405,40 @@ LEGEND.forEach(c => {{
     nodesDS.update(updates);
     updateSelectAllState();
   }});
-  item.innerHTML = `<div class="legend-dot" style="background:${{c.color}}"></div>
+  item.innerHTML = `<span class="legend-toggle">▸</span>
+    <div class="legend-dot" style="background:${{c.color}}"></div>
     <span class="legend-label">${{c.label}}</span>
     <span class="legend-count">${{c.count}}</span>`;
   item.prepend(cb);
+  const toggleEl = item.querySelector('.legend-toggle');
+
+  const childrenEl = document.createElement('div');
+  childrenEl.className = 'legend-children';
+  childrenEl.style.display = 'none';
+  (membersByCommunity.get(c.cid) || []).forEach(n => {{
+    const row = document.createElement('div');
+    row.className = 'legend-child';
+    row.dataset.nid = n.id;
+    row.style.borderLeftColor = n.color.background;
+    row.textContent = n.label;
+    childrenEl.appendChild(row);
+  }});
+
+  let expanded = false;
+  toggleEl.onclick = (e) => {{
+    e.stopPropagation();
+    expanded = !expanded;
+    toggleEl.textContent = expanded ? '▾' : '▸';
+    childrenEl.style.display = expanded ? 'block' : 'none';
+  }};
+
   item.onclick = (e) => {{
-    if (e.target === cb) return;
+    if (e.target === cb || e.target === toggleEl) return;
     cb.checked = !cb.checked;
     cb.dispatchEvent(new Event('change'));
   }};
   legendEl.appendChild(item);
+  legendEl.appendChild(childrenEl);
 }});
 </script>"""
 
@@ -516,6 +582,21 @@ def to_html(
     max_deg = max(degree.values(), default=1) or 1
     max_mc = (max(member_counts.values(), default=1) or 1) if member_counts else 1
 
+    # One "god node" per community -- its highest-degree member -- gets a
+    # default-visible label, so the idle canvas shows exactly one orientation
+    # label per cluster (mirrors the Bauer Skill Navigator's neural view:
+    # one community label while idle, narrowed to the selection's own
+    # neighbourhood once you click a node -- see _hideGodLabels/
+    # _restoreGodLabels below). This replaces the old global-degree
+    # threshold (every node above ~15% of the graph's max degree), which
+    # could label several hubs in one dense community and none in a smaller
+    # one. Ties broken by node id for reproducible output across runs.
+    god_ids: set = set()
+    for _cid, _members in communities.items():
+        if not _members:
+            continue
+        god_ids.add(max(_members, key=lambda nid: (degree.get(nid, 0), str(nid))))
+
     # Work-memory overlay (derived sidecar). When not passed explicitly, load it
     # best-effort from the sibling .graphify_learning.json next to the output
     # graph.html (which lives beside graph.json). Empty/missing => no learning
@@ -544,8 +625,10 @@ def to_html(
             font_size = 12
         else:
             size = 10 + 30 * (deg / max_deg)
-            # Only show label for high-degree nodes by default; others show on hover
-            font_size = 12 if deg >= max_deg * 0.15 else 0
+            # Only the community's god node shows a label by default; every
+            # other node's label appears on hover, or on click via
+            # _showNeighborLabels (see god_ids above).
+            font_size = 12 if node_id in god_ids else 0
         node = {
             "id": node_id,
             "label": label,
@@ -627,6 +710,7 @@ def to_html(
     nodes_json = _js_safe(vis_nodes)
     edges_json = _js_safe(vis_edges)
     legend_json = _js_safe(legend_data)
+    god_ids_json = _js_safe(sorted(god_ids))
     hyperedges_json = _js_safe(getattr(G, "graph", {}).get("hyperedges", []))
     title = _html.escape(sanitize_label(_html_document_title(output_path)))
     stats = f"{G.number_of_nodes()} nodes &middot; {G.number_of_edges()} edges &middot; {len(communities)} communities"
@@ -661,7 +745,7 @@ def to_html(
   </div>
   <div id="stats">{stats}</div>
 </div>
-{_html_script(nodes_json, edges_json, legend_json)}
+{_html_script(nodes_json, edges_json, legend_json, god_ids_json)}
 {_hyperedge_script(hyperedges_json)}
 </body>
 </html>"""
