@@ -1416,25 +1416,19 @@ def _uninstall_opencode_plugin(project_dir: Path) -> None:
             config.pop("plugin")
         config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
         print(f"  {_OPENCODE_CONFIG_PATH}  ->  plugin deregistered")
-<<<<<<< HEAD
-def _resolve_graphify_exe(name: str = "graphify") -> str:
+def _resolve_graphify_exe(name: str = "graphify", project: bool = False) -> str:
     """Return the absolute path to a graphify console script, with forward slashes.
 
-    Falls back to the bare name if resolution fails. Using an absolute path
-=======
-def _resolve_graphify_exe(project: bool = False) -> str:
-    """Return the absolute path to the graphify executable, with forward slashes.
+    With *project* set, return the bare command name instead. A project-scoped
+    install writes hook config the installer then tells the user to commit, so
+    an absolute path resolved from the installing machine is wrong for every
+    other clone: it names a directory that does not exist there, and the drive
+    letter and ``.EXE`` casing do not even survive between two Windows
+    checkouts. A committed hook refers to ``graphify`` (or ``graphify-mcp``)
+    the way it would refer to ``git`` or ``node``, and PATH resolves it per
+    machine (#3129).
 
-    With *project* set, return the bare ``graphify`` command instead. A
-    project-scoped install writes hook config the installer then tells the user
-    to commit, so an absolute path resolved from the installing machine is wrong
-    for every other clone: it names a directory that does not exist there, and
-    the drive letter and ``.EXE`` casing do not even survive between two Windows
-    checkouts. A committed hook refers to ``graphify`` the way it would refer to
-    ``git`` or ``node``, and PATH resolves it per machine (#3129).
-
-    Falls back to bare 'graphify' if resolution fails. Using an absolute path
->>>>>>> 33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2
+    Falls back to bare `name` if resolution fails. Using an absolute path
     ensures the hook works in environments where the venv Scripts/ directory is
     not on PATH (e.g. VS Code Codex extension on Windows). ``name`` selects
     which sibling console script to resolve — ``"graphify"`` (default) or
@@ -1449,13 +1443,9 @@ def _resolve_graphify_exe(project: bool = False) -> str:
     ``.replace`` is a no-op on POSIX where paths already use forward slashes.
     """
     import shutil
-<<<<<<< HEAD
-    found = shutil.which(name)
-=======
     if project:
-        return "graphify"
-    found = shutil.which("graphify")
->>>>>>> 33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2
+        return name
+    found = shutil.which(name)
     if not found:
         # Derive from sys.executable: same Scripts/ (Windows) or bin/ (Unix) dir
         scripts_dir = Path(sys.executable).parent
@@ -1464,19 +1454,13 @@ def _resolve_graphify_exe(project: bool = False) -> str:
             if candidate.exists():
                 found = str(candidate)
                 break
-<<<<<<< HEAD
     return (found or name).replace("\\", "/")
-def _install_codex_hook(project_dir: Path) -> None:
-    """Add graphify PreToolUse hook to .codex/hooks.json."""
-=======
-    return (found or "graphify").replace("\\", "/")
 def _install_codex_hook(project_dir: Path, project: bool = False) -> None:
     """Add graphify PreToolUse hook to .codex/hooks.json.
 
     A project-scoped install emits the bare command, since .codex/hooks.json is
     then committed and an installing machine's path is wrong there (#3129).
     """
->>>>>>> 33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2
     hooks_path = project_dir / ".codex" / "hooks.json"
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1780,12 +1764,8 @@ def claude_install(project_dir: Path | None = None, strict: bool = False, projec
 
     # Always re-install the Claude Code PreToolUse hook so an old hook
     # payload (e.g. pre-issue-#580 wording) is replaced on upgrade.
-<<<<<<< HEAD
-    _install_claude_hook(project_dir or Path("."), strict=strict)
-    _install_claude_mcp(project_dir or Path("."))
-=======
     _install_claude_hook(project_dir or Path("."), strict=strict, project=project)
->>>>>>> 33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2
+    _install_claude_mcp(project_dir or Path("."))
 
     print()
     print("Claude Code will now check the knowledge graph before answering")
